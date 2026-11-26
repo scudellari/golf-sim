@@ -425,7 +425,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
 | [C19](https://github.com/scudellari/golf-sim/issues/20) | The swing meter's judgment | Swing and rules | codex | C02, C04, reference data from the consuming game, C48, C64 | ~350 |
-| [C20](https://github.com/scudellari/golf-sim/issues/21) | Swings: an exact swing and seeded skill profiles | Swing and rules | codex | C19 | ~300 |
+| [C20](https://github.com/scudellari/golf-sim/issues/21) | Swings: an exact swing and seeded skill profiles | Swing and rules | codex | C19, C17 | ~300 |
 | [C21](https://github.com/scudellari/golf-sim/issues/22) | Rules: rulings, prompts and the provisional ball | Swing and rules | codex | C18, C09, reference data from the consuming game | ~450 |
 | [C22](https://github.com/scudellari/golf-sim/issues/23) | Relief: areas, complete relief, abnormal conditions, drops and placement | Swing and rules | codex | C21, C03 | ~450 |
 | [C23](https://github.com/scudellari/golf-sim/issues/24) | Hole records and the hole's setup | Variant, bundle and records | codex | C05, C17, C19, C16, reference data from the consuming game | ~450 |
