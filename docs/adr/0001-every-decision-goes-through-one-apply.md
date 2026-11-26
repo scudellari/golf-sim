@@ -1,6 +1,6 @@
 # 0001. Every decision goes through one `apply`, for people, agents and replays
 
-- Status: Accepted
+- Status: Accepted. Amended by [0005](0005-tests-and-agents-state-a-swing-or-use-a-seeded-profile.md): a test or an agent may state a swing exactly. [0004](0004-checked-against-measured-golf-not-the-earlier-implementation-s-bits.md) changes how the console and the records are checked against the reference.
 - Date: 2026-11-26
 
 ## Context
@@ -23,5 +23,5 @@ Three callers play the same round: a person through a game engine, an agent thro
 ## Consequences
 
 - An agent's record is a person's record. A game can replay a round an agent played, and the reverse.
-- The record is the proof: replaying records written by the reference implementation, and having the reference replay records the core wrote, checks the whole path from decision to result.
-- The console carries screen state that the reference kept inside its session. The console is proven against the reference's session stamp by stamp.
+- The record is the proof: the core replays its own records bit for bit, and plays the reference implementation's recorded decisions and compares the results within a tolerance (ADR 0004).
+- The console carries screen state that the reference kept inside its session. It is checked against the reference's session stamp by stamp, discrete fields exactly and numbers within a tolerance (ADR 0004).

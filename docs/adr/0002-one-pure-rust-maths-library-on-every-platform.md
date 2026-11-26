@@ -1,6 +1,6 @@
 # 0002. One pure-Rust maths library on every platform
 
-- Status: Accepted
+- Status: Accepted. [0004](0004-checked-against-measured-golf-not-the-earlier-implementation-s-bits.md) removes the `reference` feature.
 - Date: 2026-11-26
 
 ## Context
@@ -12,7 +12,7 @@ The same seed must play the same round on macOS, Linux and Windows, so saved rou
 - The core computes every transcendental with the `libm` crate, built with `force-soft-floats` so no platform-specific path runs, and called only through `golf_sim_base::fm`.
 - The core never fuses a multiply-add, starts no thread, lets no hash-map order reach an outcome, computes in 64-bit floats, and loads a course the same way whatever the path separators and line endings.
 - Clippy lints and tests enforce each rule, and the determinism suite runs on all three platforms in the release workflow.
-- While the port lasts, a `reference` feature mirrors the GDScript reference (single-precision vectors and the platform's maths) for comparisons on macOS only. No release builds it, and it is deleted when the port is complete.
+- ~~While the port lasts, a `reference` feature mirrors the GDScript reference (single-precision vectors and the platform's maths) for comparisons on macOS only.~~ Withdrawn by ADR 0004: no such feature exists.
 
 ## Alternatives considered
 
@@ -23,5 +23,5 @@ The same seed must play the same round on macOS, Linux and Windows, so saved rou
 ## Consequences
 
 - A test pass on one machine stands for the other platforms, and the release workflow confirms it.
-- The default build differs from the reference by these two changes alone. It reports its own physics, generator and analysis versions, and a drift report measures the difference on the reference's data.
+- The core reports its own physics, generator and analysis versions, and a drift report measures its difference from the reference on the reference's data (ADR 0004).
 - A platform difference that slips past the rules shows up only in the release workflow, which runs by hand before every release.
