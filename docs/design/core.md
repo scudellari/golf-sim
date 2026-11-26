@@ -2,7 +2,7 @@
 
 golf-sim is a deterministic golf simulation in Rust. This document explains how the core is shaped, the rules that keep it deterministic, how it is checked against measured data, how a person or an agent finds out what happened in a stroke, the formats it reads and writes, and the plan that builds it in small units. The decisions behind it are in [`docs/adr/`](../adr/README.md).
 
-Status: in progress, 2026-11-26. The workspace, its stubs and the determinism lints have landed (C01). [Units](#units) lists the work.
+Status: in progress, 2026-11-26. The workspace, its stubs and the determinism lints have landed (C01), and C63 brings them to this revised design. [Units](#units) lists the work.
 
 ## What the core does
 
