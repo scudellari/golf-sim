@@ -367,7 +367,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
 | [C01](https://github.com/scudellari/golf-sim/issues/1) | Workspace skeleton, shared types, determinism lints and offline builds | Shared base | codex | nothing | ~500 |
-| C53 | The validation suite: measured targets, the licence ledger and the residual report | Shared base | codex | C48, reference data from the consuming game | ~350 |
+| [C53](https://github.com/scudellari/golf-sim/issues/52) | The validation suite: measured targets, the licence ledger and the residual report | Shared base | codex | C48, reference data from the consuming game | ~350 |
 | [C02](https://github.com/scudellari/golf-sim/issues/2) | Maths: `fm`, engine-order vectors and the engine's built-ins | Maths and determinism | codex | C01, reference data from the consuming game | ~550 |
 | [C03](https://github.com/scudellari/golf-sim/issues/3) | Plane geometry: point in polygon, nearest point, segment crossing, cell-run union | Maths and determinism | codex | C01, reference data from the consuming game | ~300 |
 | [C04](https://github.com/scudellari/golf-sim/issues/4) | Seeds: `Seed::derive` and `SeedStream` | Maths and determinism | codex | C01, reference data from the consuming game | ~180 |
@@ -375,11 +375,11 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C06](https://github.com/scudellari/golf-sim/issues/6) | The determinism suite | Shared base | codex | C02, C04, C05 | ~250 |
 | [C48](https://github.com/scudellari/golf-sim/issues/7) | The tolerance table, the drift report and `golf corpus` | Shared base | codex | C05, C06, C63 | ~350 |
 | [C07](https://github.com/scudellari/golf-sim/issues/8) | Release workflow: tests, determinism and artifacts on macOS, Linux and Windows | Release | codex | C06, C48 | ~200 |
-| C63 | Revise the skeleton: no reference feature, new pins, new stubs and a library for the program | Shared base | codex | C01 | ~200 |
-| C52 | A cheap check on every push: Linux tests and clippy | Release | codex | C63 | ~60 |
-| C62 | Run both workflows on GitHub and cut v0.1.0 | Release | claude | C07, C52 | n/a |
-| C56 | The stroke trace: a recorder that costs nothing when off | Shared base | codex | C63 | ~250 |
-| C57 | Logging: `tracing` spans, levels and JSON files | Shared base | codex | C06, C56 | ~200 |
+| [C63](https://github.com/scudellari/golf-sim/issues/53) | Revise the skeleton: no reference feature, new pins, new stubs and a library for the program | Shared base | codex | C01 | ~200 |
+| [C52](https://github.com/scudellari/golf-sim/issues/54) | A cheap check on every push: Linux tests and clippy | Release | codex | C63 | ~60 |
+| [C62](https://github.com/scudellari/golf-sim/issues/55) | Run both workflows on GitHub and cut v0.1.0 | Release | claude | C07, C52 | n/a |
+| [C56](https://github.com/scudellari/golf-sim/issues/56) | The stroke trace: a recorder that costs nothing when off | Shared base | codex | C63 | ~250 |
+| [C57](https://github.com/scudellari/golf-sim/issues/57) | Logging: `tracing` spans, levels and JSON files | Shared base | codex | C06, C56 | ~200 |
 
 ### Phase 1. Strokes on a constant day
 
@@ -396,8 +396,8 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C16](https://github.com/scudellari/golf-sim/issues/17) | The world on a constant day | World and stroke | codex | C09, C15, reference data from the consuming game | ~550 |
 | [C17](https://github.com/scudellari/golf-sim/issues/18) | Stroke setup: address, bag, tuning and delivery | World and stroke | codex | C16 | ~600 |
 | [C18](https://github.com/scudellari/golf-sim/issues/19) | The stroke facade, `golf stroke` and `golf course check` | World and stroke | codex | C17 | ~500 |
-| C54 | `golf validate`, `golf fit` and the calibration script | Tools | codex | C18, C53 | ~500 |
-| C58 | `golf explain` and stroke repros | Tools | codex | C54 | ~450 |
+| [C54](https://github.com/scudellari/golf-sim/issues/58) | `golf validate`, `golf fit` and the calibration script | Tools | codex | C18, C53 | ~500 |
+| [C58](https://github.com/scudellari/golf-sim/issues/59) | `golf explain` and stroke repros | Tools | codex | C54 | ~450 |
 
 ### Phase 2. A hole on a constant day
 
@@ -414,9 +414,9 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C26](https://github.com/scudellari/golf-sim/issues/28) | Observation: the HUD's numbers | Hole, testing and CLI | codex | C25 | ~400 |
 | [C27](https://github.com/scudellari/golf-sim/issues/29) | `golf play`, `golf replay` and `golf schema` | Hole, testing and CLI | codex | C26, C58 | ~500 |
 | [C28](https://github.com/scudellari/golf-sim/issues/30) | `golf batch` and the scripted golfer | Hole, testing and CLI | codex | C27 | ~350 |
-| C55 | `golf sweep` and `golf scenario`: balance reports and expected results | Hole, testing and CLI | codex | C28, C58 | ~450 |
-| C59 | Repro bundles: replay a failure, explain it, and turn it into a test | Hole, testing and CLI | codex | C55, C58 | ~400 |
-| C60 | Debugging guide: breakpoints in the program and in Godot | Hole, testing and CLI | codex | C59 | ~150 |
+| [C55](https://github.com/scudellari/golf-sim/issues/60) | `golf sweep` and `golf scenario`: balance reports and expected results | Hole, testing and CLI | codex | C28, C58 | ~450 |
+| [C59](https://github.com/scudellari/golf-sim/issues/61) | Repro bundles: replay a failure, explain it, and turn it into a test | Hole, testing and CLI | codex | C55, C58 | ~400 |
+| [C60](https://github.com/scudellari/golf-sim/issues/62) | Debugging guide: breakpoints in the program and in Godot | Hole, testing and CLI | codex | C59 | ~150 |
 
 ### Phase 3. The person's console, headless
 
