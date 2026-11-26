@@ -405,6 +405,117 @@ fn vector_components_use_their_own_expected_vectors() {
 }
 
 #[test]
+fn full_fixture_key_overrides_the_layer_row() {
+    let work = TempDir::new();
+    let testdata = work.0.join("testdata");
+    fs::create_dir(&testdata).unwrap();
+    fs::write(
+        testdata.join("tolerances.toml"),
+        r#"
+[physics]
+abs = 0.0
+rel = 0.0
+discrete_share = 0.0
+
+["physics/strokes"]
+abs = 0.125
+rel = 0.0
+f32_steps = 2
+scale_from = ["input"]
+discrete_share = 0.0
+"#,
+    )
+    .unwrap();
+    let path = testdata.join("fixture.bin");
+    let write = |key| {
+        write_fixture(
+            &path,
+            &fixture(
+                key,
+                vec![object([
+                    ("id", "same-input".into()),
+                    ("input", 8.0.into()),
+                    ("output", 1.0.into()),
+                ])],
+            ),
+        );
+    };
+    let run = |_: &variant::Dict| Ok::<_, Infallible>(1.125.into());
+    write("physics/strokes");
+    assert_eq!(tolerance::check(&path, "physics", run).unwrap().checked, 1);
+    let drift = Fixture::read(&path).unwrap().drift("physics", run).unwrap();
+    assert_eq!(drift.numeric["$"].steps.size, 131_072.0);
+
+    write("physics/contact");
+    let error = tolerance::check(&path, "physics", run).unwrap_err();
+    assert!(error.to_string().contains("abs 1.25e-1"), "{error}");
+    let drift = Fixture::read(&path).unwrap().drift("physics", run).unwrap();
+    assert_eq!(drift.numeric["$"].steps.size, 1_048_576.0);
+}
+
+#[test]
+fn indexed_field_bounds_match_any_index_and_prefer_literals() {
+    let work = TempDir::new();
+    let testdata = work.0.join("testdata");
+    fs::create_dir(&testdata).unwrap();
+    fs::write(
+        testdata.join("tolerances.toml"),
+        r#"
+[physics]
+abs = 0.0
+rel = 0.0
+discrete_share = 0.0
+
+[physics.fields]
+events = { abs = 0.5 }
+"events[*].time_s" = { abs = 0.25 }
+"events[0].time_s" = { abs = 0.125 }
+"#,
+    )
+    .unwrap();
+    let path = testdata.join("fixture.bin");
+    let output = |first, last| {
+        let events = (0..=10)
+            .map(|index| {
+                let time = match index {
+                    0 => first,
+                    10 => last,
+                    _ => 1.0,
+                };
+                object([("time_s", Variant::from(time))])
+            })
+            .collect();
+        object([("events", Variant::Array(Array::new(events)))])
+    };
+    write_fixture(
+        &path,
+        &fixture(
+            "physics",
+            vec![object([
+                ("id", "events".into()),
+                ("output", output(1.0, 1.0)),
+            ])],
+        ),
+    );
+    let check = |first, last| {
+        tolerance::check(&path, "physics", |_| {
+            Ok::<_, Infallible>(output(first, last))
+        })
+    };
+    assert_eq!(check(1.125, 1.25).unwrap().checked, 1);
+    for (first, last, field) in [
+        (1.25, 1.25, "events[0].time_s"),
+        (1.125, 1.5, "events[10].time_s"),
+    ] {
+        let error = check(first, last).unwrap_err();
+        assert!(
+            error.to_string().contains(&format!(".output.{field} ")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn shared_check_uses_the_scalar_ulp_bound_from_the_math_layer() {
     let work = TempDir::new();
     let path = work.0.join("math.bin");

@@ -3,7 +3,8 @@
 # A number passes if it meets any bound on its row. f32_steps = k allows k × 2^-23 × s,
 # where s is the largest of 1, the expected magnitude (largest component for a vector),
 # and the magnitudes at the case paths in scale_from. The longest matching field row
-# overrides the layer row.
+# overrides the default bounds. [*] matches any index, with literal indices preferred
+# for keys of equal length. A full fixture key overrides its layer row.
 
 [math]
 abs = 0.0
@@ -50,6 +51,33 @@ rel = 0.0
 f32_steps = 8
 discrete_share = 0.005
 fields = { rest = { abs = 0.05, rel = 0.0 }, samples = { abs = 0.05, rel = 0.0 }, carry_m = { abs = 0.1, rel = 0.0 }, speed_mps = { abs = 0.0, rel = 1e-4 } }
+
+# Whole-stroke bounds under the field names recorded by this fixture.
+["physics/strokes"]
+abs = 0.0
+rel = 0.0
+f32_steps = 8
+discrete_share = 0.005
+
+["physics/strokes".fields]
+rest_position = { abs = 0.05, rel = 0.0 }
+positions = { abs = 0.05, rel = 0.0 }
+# A rolling ball's stop time is ill-conditioned near the stop speed; 10 ms is under one 60 Hz frame.
+"times[*]" = { abs = 0.01 }
+carry_m = { abs = 0.1, rel = 0.0 }
+"launch.ball_speed_mps" = { abs = 0.0, rel = 1e-4 }
+"events[*].position" = { abs = 0.05 }
+"events[*].time_s" = { abs = 1e-3 }
+"events[*].velocity" = { abs = 1e-3, rel = 1e-4 }
+# A tree or wall contact amplifies rounding in its normal; 0.05 rad/s is half an rpm.
+"events[*].spin" = { abs = 0.05, rel = 1e-4 }
+"touchdowns[*].position" = { abs = 0.05 }
+"touchdowns[*].contact_point" = { abs = 0.05 }
+"touchdowns[*].time_s" = { abs = 1e-3 }
+"touchdowns[*].velocity" = { abs = 1e-3, rel = 1e-4 }
+"touchdowns[*].depth_m" = { abs = 1e-4 }
+"launch.velocity" = { abs = 1e-3, rel = 1e-4 }
+"launch.spin" = { abs = 0.01, rel = 1e-4 }
 
 [tools]
 abs = 0.0

@@ -3,6 +3,7 @@
 use std::{
     borrow::Cow,
     cell::OnceCell,
+    cmp::Reverse,
     collections::{BTreeMap, BTreeSet},
     error::Error as StdError,
     fmt, fs,
@@ -82,9 +83,10 @@ struct Layer {
 }
 
 impl Layer {
-    fn load(path: &Path, name: &str) -> CorpusResult<Option<Self>> {
+    fn load(path: &Path, key: &str, layer: &str) -> CorpusResult<Option<Self>> {
         let mut layers: BTreeMap<String, Self> =
             read_config(path, include_str!("../tolerances.toml"))?;
+        let name = if layers.contains_key(key) { key } else { layer };
         let Some(layer) = layers.remove(name) else {
             return Ok(None);
         };
@@ -109,10 +111,57 @@ impl Layer {
     fn bounds_for(&self, path: &str) -> Option<&Bounds> {
         self.fields
             .iter()
-            .filter(|(prefix, _)| at_or_below(path, prefix))
-            .max_by_key(|(prefix, _)| prefix.len())
+            .filter(|(prefix, _)| matches_field_path(path, prefix))
+            .max_by_key(|(prefix, _)| (prefix.len(), Reverse(prefix.matches("[*]").count())))
             .map(|(_, bounds)| bounds)
     }
+
+    fn numeric_tolerance(
+        &self,
+        field: Option<&Bounds>,
+        bounds: &Bounds,
+        measurement: Option<(Number, Number, Delta)>,
+    ) -> Option<Tolerance> {
+        let scalar_ulps = self.scalar_ulps.filter(|_| field.is_none());
+        let mut step_bound = None;
+        if let Some((expected, actual, delta)) = measurement {
+            if let Some(limit) = scalar_ulps
+                && matches!(expected, Number::Scalar(_))
+            {
+                if expected.within_ulps(actual, limit) {
+                    return Some(Tolerance {
+                        absolute: delta.absolute,
+                        relative: 0.0,
+                    });
+                }
+                // Preserve the legacy scalar ULP rule for rows without a step bound.
+                bounds.f32_steps?;
+            }
+            step_bound = bounds
+                .f32_steps
+                .filter(|limit| delta.steps <= *limit)
+                .map(|_| delta.absolute);
+        }
+        bounds.tolerance(step_bound)
+    }
+}
+
+fn matches_field_path(mut path: &str, mut pattern: &str) -> bool {
+    while let Some((literal, tail)) = pattern.split_once("[*]") {
+        let Some((index, rest)) = path
+            .strip_prefix(literal)
+            .and_then(|path| path.strip_prefix('['))
+            .and_then(|path| path.split_once(']'))
+        else {
+            return false;
+        };
+        if index.is_empty() || !index.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        path = rest;
+        pattern = tail;
+    }
+    at_or_below(path, pattern)
 }
 
 fn at_or_below(path: &str, prefix: &str) -> bool {
@@ -144,12 +193,15 @@ impl Fixture {
     }
 
     pub fn layer(&self) -> &str {
-        let tag = self
-            .fields
+        let key = self.key();
+        key.split_once('/').map_or(key, |(layer, _)| layer)
+    }
+
+    fn key(&self) -> &str {
+        self.fields
             .get("layer")
             .and_then(Variant::as_str)
-            .expect("validated corpus layer");
-        tag.split_once('/').map_or(tag, |(layer, _)| layer)
+            .expect("validated corpus layer")
     }
 
     fn require_layer(&self, layer: &str) -> CorpusResult<()> {
@@ -719,30 +771,10 @@ fn compare_case(
     let tolerance = |path: &str| {
         let field = layer.bounds_for(path);
         let bounds = field.unwrap_or(&default);
-        let scalar_ulps = layer.scalar_ulps.filter(|_| field.is_none());
-        let mut step_bound = None;
-        if (scalar_ulps.is_some() || bounds.f32_steps.is_some())
-            && let Some(&(expected, actual, delta)) = measurements().get(path)
-        {
-            if let Some(limit) = scalar_ulps
-                && matches!(expected, Number::Scalar(_))
-            {
-                if expected.within_ulps(actual, limit) {
-                    return Some(Tolerance {
-                        absolute: delta.absolute,
-                        relative: 0.0,
-                    });
-                }
-                // Preserve the legacy scalar ULP rule for rows without a step bound.
-                bounds.f32_steps?;
-            }
-            // A passing step comparison can use the base comparer's absolute bound.
-            step_bound = bounds
-                .f32_steps
-                .filter(|limit| delta.steps <= *limit)
-                .map(|_| delta.absolute);
-        }
-        bounds.tolerance(step_bound)
+        let measurement = (layer.scalar_ulps.is_some() || bounds.f32_steps.is_some())
+            .then(|| measurements().get(path).copied())
+            .flatten();
+        layer.numeric_tolerance(field, bounds, measurement)
     };
     let failure = |difference| -> Box<dyn StdError> {
         CheckFailure {
@@ -863,8 +895,9 @@ impl fmt::Display for CheckFailure {
 
 impl StdError for CheckFailure {}
 
-/// Run a fixture against the layer's configured tolerances and skip intentional departures.
+/// Run a fixture against its configured tolerances and skip intentional departures.
 ///
+/// A row for the full fixture key takes precedence over the layer row.
 /// Use the fixture's enclosing `testdata` directory or `testdata` in the working directory.
 /// Built-in defaults let the installed command run with standalone fixtures.
 pub fn check<E: fmt::Display>(
@@ -875,7 +908,7 @@ pub fn check<E: fmt::Display>(
     let fixture = Fixture::read(path)?;
     fixture.require_layer(layer)?;
     let config = fixture.testdata.join(TOLERANCES);
-    let limits = Layer::load(&config, layer)?
+    let limits = Layer::load(&config, fixture.key(), layer)?
         .ok_or_else(|| format!("{}: no tolerances for layer {layer:?}", config.display()))?;
     let (cases, skipped) = fixture.selected_cases()?;
     let checked = cases.len();
@@ -919,6 +952,8 @@ pub struct DriftReport {
     pub numeric: BTreeMap<String, FieldDrift>,
     pub discrete: Vec<Difference>,
     pub skipped: Vec<Departure>,
+    #[cfg(test)]
+    pub(crate) out_of_bounds: Vec<Difference>,
 }
 
 impl fmt::Display for DriftReport {
@@ -953,7 +988,8 @@ impl Fixture {
         mut run: impl FnMut(&Dict) -> Result<Variant, E>,
     ) -> CorpusResult<DriftReport> {
         self.require_layer(layer)?;
-        let limits = Layer::load(&self.testdata.join(TOLERANCES), layer)?.unwrap_or_default();
+        let limits =
+            Layer::load(&self.testdata.join(TOLERANCES), self.key(), layer)?.unwrap_or_default();
         let default = limits.default_bounds();
         let (cases, skipped) = self.selected_cases()?;
         let mut report = DriftReport {
@@ -971,7 +1007,27 @@ impl Fixture {
                     .unwrap_or(&default)
                     .input_scale(&scales)
             };
-            for (field, _, _, delta) in fields.numeric(input_scale) {
+            for (field, expected, actual, delta) in fields.numeric(input_scale) {
+                #[cfg(not(test))]
+                let _ = (expected, actual);
+                #[cfg(test)]
+                {
+                    let row = limits.bounds_for(field);
+                    let tolerance = limits.numeric_tolerance(
+                        row,
+                        row.unwrap_or(&default),
+                        Some((expected, actual, delta)),
+                    );
+                    if corpus::first_difference_with(&expected.variant(), &actual.variant(), |_| {
+                        tolerance
+                    })
+                    .is_some()
+                    {
+                        report
+                            .out_of_bounds
+                            .push(case.difference(field, Some(delta)));
+                    }
+                }
                 let maximum = |size| Maximum {
                     size,
                     case_id: case.id().into(),
