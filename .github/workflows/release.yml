@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOLF_SIM_COMMIT: ${{ github.sha }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-14
+            target: aarch64-apple-darwin
+            executable_suffix: ''
+            library: libgolf_sim_godot.dylib
+          - platform: linux
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            executable_suffix: ''
+            library: libgolf_sim_godot.so
+          - platform: windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            executable_suffix: .exe
+            library: golf_sim_godot.dll
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-26
+        with:
+          toolchain: '1.94'
+          components: clippy
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Reject the reference feature
+        if: matrix.platform == 'linux'
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          manifests = subprocess.check_output(
+              ["git", "ls-files", "-z", "--", "Cargo.toml", "*/Cargo.toml"]
+          ).split(b"\0")[:-1]
+          forbidden = []
+          for name in manifests:
+              path = Path(os.fsdecode(name))
+              with path.open("rb") as file:
+                  if "reference" in tomllib.load(file).get("features", {}):
+                      forbidden.append(str(path))
+          if forbidden:
+              raise SystemExit("The reference feature is forbidden in " + ", ".join(forbidden))
+          PY
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+      - uses: mlugg/setup-zig@v2 # TODO(dispatcher): pin to a commit
+        if: matrix.platform == 'linux'
+        with:
+          version: '0.14.1'
+      - uses: taiki-e/install-action@v2 # TODO(dispatcher): pin to a commit
+        if: matrix.platform == 'linux'
+        with:
+          tool: cargo-zigbuild@0.20.1
+      - name: Test workspace and determinism
+        run: cargo test --workspace --offline --locked
+      - name: Compute determinism digests
+        # The suite has verified the committed snapshots. Regenerate them for this runner's artifact.
+        run: cargo run --offline --locked -p golf-sim-testkit -- bless --all
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-${{ matrix.platform }}
+          path: testdata/determinism/*.json
+          if-no-files-found: error
+          overwrite: true
+      - name: Build release for Linux (glibc 2.28)
+        if: matrix.platform == 'linux'
+        run: cargo zigbuild --offline --locked --release --target x86_64-unknown-linux-gnu.2.28 -p golf-sim-cli -p golf-sim-godot
+      - name: Build native release
+        if: matrix.platform != 'linux'
+        run: cargo build --offline --locked --release --target "$TARGET" -p golf-sim-cli -p golf-sim-godot
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Stage release binaries
+        env:
+          EXE: ${{ matrix.executable_suffix }}
+          LIBRARY: ${{ matrix.library }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          binaries="$RUNNER_TEMP/release-binaries"
+          mkdir -p "$binaries"
+          cp "target/$TARGET/release/golf$EXE" "$binaries/golf-$PLATFORM$EXE"
+          cp "target/$TARGET/release/$LIBRARY" "$binaries/${LIBRARY%.*}-$PLATFORM.${LIBRARY##*.}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: binaries-${{ matrix.platform }}
+          path: ${{ runner.temp }}/release-binaries
+          if-no-files-found: error
+          overwrite: true
+
+  compare-digests:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/determinism
+      - name: Compare platform digests
+        run: sh scripts/compare-digests.sh "$RUNNER_TEMP/determinism"
+
+  attach-release:
+    if: github.ref_type == 'tag' || github.event_name == 'release'
+    needs: compare-digests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-assets-${{ github.event.release.tag_name || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-binaries
+      - name: Attach binaries and checksums
+        working-directory: ${{ runner.temp }}/release-binaries
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          files=(*)
+          sha256sum -- "${files[@]}" > SHA256SUMS
+          if gh release view -- "$RELEASE_TAG" >/dev/null; then
+            gh release upload --clobber -- "$RELEASE_TAG" "${files[@]}" SHA256SUMS
+          else
+            gh release create --verify-tag --generate-notes -- "$RELEASE_TAG" "${files[@]}" SHA256SUMS
+          fi
