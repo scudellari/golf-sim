@@ -7,3 +7,5 @@ testdata/** binary
 *.rec binary
 # Expected digests are JSON that people read in a diff.
 testdata/determinism/*.json text eol=lf diff merge
+# The tolerance and departure tables are TOML that people read in a diff.
+testdata/*.toml text eol=lf diff merge
