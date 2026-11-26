@@ -19,6 +19,7 @@ golf-sim-conditions = { path = "crates/golf-sim-conditions" }
 golf-sim-swing = { path = "crates/golf-sim-swing" }
 golf-sim-stroke = { path = "crates/golf-sim-stroke" }
 golf-sim-rules = { path = "crates/golf-sim-rules" }
+golf-sim-testkit = { path = "crates/golf-sim-testkit" }
 golf-sim-validate = { path = "crates/golf-sim-validate" }
 
 # Every transcendental comes from here, on the soft-float path, through golf_sim_base::fm (ADR 0002).

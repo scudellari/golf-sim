@@ -18,7 +18,9 @@ golf-sim-swing.workspace = true
 golf-sim-stroke.workspace = true
 golf-sim-rules.workspace = true
 sha2.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 proc-macro2.workspace = true

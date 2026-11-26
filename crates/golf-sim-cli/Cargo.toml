@@ -15,6 +15,8 @@ path = "src/main.rs"
 [dependencies]
 golf-sim.workspace = true
 golf-sim-validate.workspace = true
+# `golf corpus` reuses the tolerance comparisons the tests use.
+golf-sim-testkit.workspace = true
 clap = { workspace = true, features = ["string"] }
 serde.workspace = true
 serde_json.workspace = true
