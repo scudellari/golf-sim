@@ -14,3 +14,6 @@ golf-sim-physics.workspace = true
 golf-sim-course.workspace = true
 golf-sim-conditions.workspace = true
 golf-sim-swing.workspace = true
+
+[dev-dependencies]
+golf-sim-validate.workspace = true
