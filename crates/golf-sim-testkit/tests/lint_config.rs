@@ -52,7 +52,10 @@ fn clippy_flags_every_banned_line_of_the_fixture_and_no_other() {
     let flagged: BTreeSet<usize> = stderr
         .lines()
         .filter(|line| line.contains("disallowed"))
-        .filter_map(|line| line.strip_prefix("src/lib.rs:"))
+        .filter_map(|line| {
+            line.strip_prefix("src/lib.rs:")
+                .or_else(|| line.strip_prefix("src\\lib.rs:"))
+        })
         .filter_map(|rest| rest.split(':').next()?.parse().ok())
         .collect();
     assert_eq!(

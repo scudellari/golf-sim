@@ -26,7 +26,7 @@ jobs:
       matrix:
         include:
           - platform: macos
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
             executable_suffix: ''
             library: libgolf_sim_godot.dylib
