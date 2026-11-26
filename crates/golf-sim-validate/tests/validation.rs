@@ -23,11 +23,11 @@ fn earlier(target: &Target, _: &Conditions) -> Option<Quantities> {
 fn committed_corpus_loads_reports_and_scores() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/validation");
     let corpus = Corpus::load(root).unwrap();
-    assert_eq!(corpus.files().len(), 25);
+    assert_eq!(corpus.files().len(), 27);
     let report = corpus.run(&measured);
-    assert_eq!(report.targets.len(), 1101);
-    assert_eq!(count(&report, Status::Passed), 1094);
-    assert_eq!(count(&report, Status::ReportedOnly), 7);
+    assert_eq!(report.targets.len(), 1158);
+    assert_eq!(count(&report, Status::Passed), 1102);
+    assert_eq!(count(&report, Status::ReportedOnly), 56);
     assert_eq!(count(&report, Status::Failed), 0);
     assert_eq!(count(&report, Status::NotRun), 0);
     let text = report.to_string();
@@ -72,14 +72,14 @@ fn committed_corpus_loads_reports_and_scores() {
         .iter()
         .filter_map(|row| row.score)
         .collect();
-    assert_eq!(normalized, [0.0, 0.0]);
+    assert_eq!(normalized, [0.0, 0.0, 0.0, 0.0]);
     let json = serde_json::to_string(&scorecard).unwrap();
     assert_eq!(serde_json::from_str::<Scorecard>(&json).unwrap(), scorecard);
     assert!(scorecard.to_string().contains("BIB\tturf_bounce\tfit"));
 
     let baseline = corpus.run(&earlier);
-    assert_eq!(count(&baseline, Status::Passed), 1094);
-    assert_eq!(count(&baseline, Status::NotRun), 7);
+    assert_eq!(count(&baseline, Status::Passed), 1102);
+    assert_eq!(count(&baseline, Status::NotRun), 56);
     assert_eq!(count(&baseline, Status::Failed), 0);
     println!(
         "{} targets · {} pass · {} reported only · {} ledger datasets with rows · normalized scores {normalized:?}",
@@ -89,7 +89,7 @@ fn committed_corpus_loads_reports_and_scores() {
         covered.len(),
     );
     println!("{sample}");
-    println!("Earlier predictions · 1094 pass · 7 not run");
+    println!("Earlier predictions · 1102 pass · 56 not run");
 }
 
 #[test]

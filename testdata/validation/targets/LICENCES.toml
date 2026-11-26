@@ -127,13 +127,14 @@ files = []
 checked_on = "2026-11-26"
 
 [datasets.randa-reports]
-sources = ["R47", "R22"]
+sources = ["R47", "R22", "SPIN07", "R04"]
 verdict = "cite"
 licence = "none found"
 checked = "https://www.randa.org/terms-and-conditions"
 terms = "The documents carry no licence line. The R&A site terms: \"You may use the Content only for your personal, non-commercial use, and provided that you acknowledge the copyright owner.\" The USGA terms page refused the fetch."
-use = "Robot face map deltas, fairway run means and spreads, and one launch-condition row."
-files = ["r47.json", "r22.json"]
+notes = "The spin report is read from the Japan Golf Association's copy, which carries no licence line either. R04's site means and the spin report's spreads are read from the vector points of their figures."
+use = "Robot face map deltas, fairway run means and spreads, one launch-condition row, the spin report's green landing fits, and R04's landing means by site and turf stiffness."
+files = ["r47.json", "r22.json", "spin07.json", "r04.json"]
 checked_on = "2026-11-26"
 
 [datasets.haake-1989]
@@ -142,7 +143,7 @@ verdict = "cite"
 licence = "none found"
 checked = "https://publications.aston.ac.uk/id/eprint/15132"
 terms = "The record states no licence. Footer \"(c) Copyright Aston University\". The archive copy is a chapter excerpt with no notice."
-use = "Two green impacts, the green bounce fit."
+use = "Two green impacts and the setting means of one slipping green, the green bounce fit."
 files = ["h.json"]
 checked_on = "2026-11-26"
 
