@@ -3,7 +3,7 @@
 use std::{
     borrow::Cow,
     cell::OnceCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     error::Error as StdError,
     fmt, fs,
     io::ErrorKind,
@@ -22,6 +22,7 @@ type CorpusResult<T> = Result<T, Box<dyn StdError>>;
 
 const TOLERANCES: &str = "tolerances.toml";
 const DEPARTURES: &str = "departures.toml";
+const SINGLE_PRECISION_STEP: Real = f32::EPSILON as Real;
 
 fn read_config<T: serde::de::DeserializeOwned>(path: &Path, default: &str) -> CorpusResult<T> {
     let contents = match fs::read_to_string(path) {
@@ -32,72 +33,91 @@ fn read_config<T: serde::de::DeserializeOwned>(path: &Path, default: &str) -> Co
     toml::from_str(&contents).map_err(|error| format!("{}: {error}", path.display()).into())
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Bounds {
+    #[serde(default)]
     abs: Real,
+    #[serde(default)]
     rel: Real,
+    f32_steps: Option<Real>,
+    #[serde(default)]
+    scale_from: Vec<String>,
 }
 
 impl Bounds {
-    fn valid(self) -> bool {
-        [self.abs, self.rel]
+    fn valid(&self) -> bool {
+        [self.abs, self.rel, self.f32_steps.unwrap_or_default()]
             .into_iter()
             .all(|bound| bound.is_finite() && bound >= 0.0)
     }
 
-    fn tolerance(self) -> Option<Tolerance> {
-        (self.abs > 0.0 || self.rel > 0.0).then_some(Tolerance {
-            absolute: self.abs,
+    fn tolerance(&self, step_bound: Option<Real>) -> Option<Tolerance> {
+        (self.abs > 0.0 || self.rel > 0.0 || step_bound.is_some()).then_some(Tolerance {
+            absolute: self.abs.max(step_bound.unwrap_or_default()),
             relative: self.rel,
         })
     }
+
+    fn input_scale(&self, scales: &BTreeMap<&str, Real>) -> Real {
+        self.scale_from
+            .iter()
+            .map(|path| scales[path.as_str()])
+            .fold(1.0, Real::max)
+    }
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Layer {
     abs: Real,
     rel: Real,
     discrete_share: Real,
     scalar_ulps: Option<u64>,
+    f32_steps: Option<Real>,
+    #[serde(default)]
+    scale_from: Vec<String>,
     #[serde(default)]
     fields: BTreeMap<String, Bounds>,
 }
 
 impl Layer {
-    fn load(path: &Path, name: &str) -> CorpusResult<Self> {
+    fn load(path: &Path, name: &str) -> CorpusResult<Option<Self>> {
         let mut layers: BTreeMap<String, Self> =
             read_config(path, include_str!("../../../testdata/tolerances.toml"))?;
-        let layer = layers
-            .remove(name)
-            .ok_or_else(|| format!("{}: no tolerances for layer {name:?}", path.display()))?;
+        let Some(layer) = layers.remove(name) else {
+            return Ok(None);
+        };
         if !layer.default_bounds().valid()
             || !layer.fields.values().all(|bounds| bounds.valid())
             || !(0.0..=1.0).contains(&layer.discrete_share)
         {
             return Err(format!("{}: invalid bounds for layer {name:?}", path.display()).into());
         }
-        Ok(layer)
+        Ok(Some(layer))
     }
 
     fn default_bounds(&self) -> Bounds {
         Bounds {
             abs: self.abs,
             rel: self.rel,
+            f32_steps: self.f32_steps,
+            scale_from: self.scale_from.clone(),
         }
     }
 
-    fn bounds_for(&self, path: &str) -> Option<Bounds> {
+    fn bounds_for(&self, path: &str) -> Option<&Bounds> {
         self.fields
             .iter()
-            .filter(|(prefix, _)| {
-                path.strip_prefix(prefix.as_str())
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '[']))
-            })
+            .filter(|(prefix, _)| at_or_below(path, prefix))
             .max_by_key(|(prefix, _)| prefix.len())
-            .map(|(_, bounds)| *bounds)
+            .map(|(_, bounds)| bounds)
     }
+}
+
+fn at_or_below(path: &str, prefix: &str) -> bool {
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '[']))
 }
 
 pub struct Fixture {
@@ -220,6 +240,50 @@ impl Case<'_> {
             delta,
         }
     }
+
+    fn source_scales<'a, 'b>(
+        &self,
+        layer: &'a Layer,
+        default: &'a Bounds,
+        output: impl FnOnce() -> &'b OutputFields,
+    ) -> CorpusResult<BTreeMap<&'a str, Real>> {
+        if default.scale_from.is_empty()
+            && layer.fields.values().all(|row| row.scale_from.is_empty())
+        {
+            return Ok(BTreeMap::new());
+        }
+        let sources: BTreeSet<_> = output()
+            .expected
+            .iter()
+            .flat_map(|(path, _)| &layer.bounds_for(path).unwrap_or(default).scale_from)
+            .map(String::as_str)
+            .collect();
+        if sources.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let mut numbers = Numbers {
+            paths: Some(BTreeSet::new()),
+            ..Numbers::default()
+        };
+        numbers.record_path("$");
+        split_dict(self.fields, "$", &mut numbers);
+        sources
+            .into_iter()
+            .map(|source| {
+                numbers
+                    .magnitude_at(source)
+                    .map(|scale| (source, scale))
+                    .ok_or_else(|| {
+                        format!(
+                            "cases[{}] (case {:?}): scale_from path {source:?} is missing",
+                            self.index,
+                            self.id()
+                        )
+                        .into()
+                    })
+            })
+            .collect()
+    }
 }
 
 /// A fixture runner with no captured state.
@@ -251,11 +315,16 @@ pub fn variant_snapshot(case: &Dict) -> Result<Variant, Error> {
 pub struct Delta {
     pub absolute: Real,
     pub relative: Real,
+    pub steps: Real,
 }
 
 impl fmt::Display for Delta {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "abs {:e}, rel {:e}", self.absolute, self.relative)
+        write!(
+            f,
+            "abs {:e}, rel {:e}, steps {:e}",
+            self.absolute, self.relative, self.steps
+        )
     }
 }
 
@@ -281,12 +350,31 @@ impl std::error::Error for Difference {}
 #[derive(Clone, Copy)]
 enum Number {
     Integer(i64),
-    Real(Real),
+    Component { value: Real, scale: Real },
     Scalar(Real),
 }
 
 impl Number {
-    fn delta(self, actual: Self) -> Option<Delta> {
+    fn component(value: Real) -> Self {
+        Self::Component {
+            value,
+            scale: finite_magnitude(value),
+        }
+    }
+
+    fn magnitude(self) -> Real {
+        match self {
+            Self::Integer(value) => value.unsigned_abs() as Real,
+            Self::Component { value, .. } | Self::Scalar(value) => finite_magnitude(value),
+        }
+    }
+
+    fn delta(self, actual: Self, input_scale: Real) -> Option<Delta> {
+        let expected_scale = match self {
+            Self::Component { scale, .. } => scale,
+            _ => self.magnitude(),
+        };
+        let step_size = SINGLE_PRECISION_STEP * input_scale.max(expected_scale);
         match (self, actual) {
             (Self::Integer(a), Self::Integer(b)) => {
                 let absolute = a.abs_diff(b) as Real;
@@ -296,19 +384,26 @@ impl Number {
                 } else {
                     absolute / scale
                 };
-                Some(Delta { absolute, relative })
+                Some(Delta {
+                    absolute,
+                    relative,
+                    steps: absolute / step_size,
+                })
             }
-            (Self::Real(a), Self::Real(b)) | (Self::Scalar(a), Self::Scalar(b)) => {
+            (Self::Component { value: a, .. }, Self::Component { value: b, .. })
+            | (Self::Scalar(a), Self::Scalar(b)) => {
                 if a.to_bits() == b.to_bits() {
                     return Some(Delta {
                         absolute: 0.0,
                         relative: 0.0,
+                        steps: 0.0,
                     });
                 }
                 if !a.is_finite() || !b.is_finite() {
                     return Some(Delta {
                         absolute: Real::INFINITY,
                         relative: Real::INFINITY,
+                        steps: Real::INFINITY,
                     });
                 }
                 let absolute = (a - b).abs();
@@ -320,7 +415,16 @@ impl Number {
                 } else {
                     (a / scale - b / scale).abs()
                 };
-                Some(Delta { absolute, relative })
+                let steps = if absolute.is_finite() {
+                    absolute / step_size
+                } else {
+                    (a / step_size - b / step_size).abs()
+                };
+                Some(Delta {
+                    absolute,
+                    relative,
+                    steps,
+                })
             }
             _ => None,
         }
@@ -329,7 +433,7 @@ impl Number {
     fn variant(self) -> Variant {
         match self {
             Self::Integer(value) => value.into(),
-            Self::Real(value) | Self::Scalar(value) => value.into(),
+            Self::Component { value, .. } | Self::Scalar(value) => value.into(),
         }
     }
 
@@ -351,7 +455,36 @@ impl Number {
     }
 }
 
-type Numbers = Vec<(String, Number)>;
+fn finite_magnitude(value: Real) -> Real {
+    if value.is_finite() { value.abs() } else { 0.0 }
+}
+
+#[derive(Default)]
+struct Numbers {
+    values: Vec<(String, Number)>,
+    paths: Option<BTreeSet<String>>,
+}
+
+impl Numbers {
+    fn record_path(&mut self, path: &str) {
+        if let Some(paths) = &mut self.paths {
+            paths.insert(path.into());
+        }
+    }
+
+    fn push(&mut self, path: String, number: Number) {
+        self.values.push((path, number));
+    }
+
+    fn magnitude_at(&self, source: &str) -> Option<Real> {
+        self.values
+            .iter()
+            .filter(|(path, _)| source == "$" || !source.is_empty() && at_or_below(path, source))
+            .map(|(_, number)| number.magnitude())
+            .reduce(Real::max)
+            .or_else(|| self.paths.as_ref()?.contains(source).then_some(0.0))
+    }
+}
 
 fn numeric_path(parent: &str, field: &str) -> String {
     if parent == "$" {
@@ -382,6 +515,13 @@ fn key_path(parent: &str, key: &Variant, index: usize) -> String {
     }
 }
 
+fn component_path(parent: &str, axes: &[&str], index: usize) -> String {
+    axes.get(index).map_or_else(
+        || indexed_path(parent, index),
+        |axis| numeric_path(parent, axis),
+    )
+}
+
 fn components<T: Copy + Default>(
     values: &mut [T],
     axes: &[&str],
@@ -390,11 +530,10 @@ fn components<T: Copy + Default>(
     number: impl Fn(T) -> Number,
 ) {
     for (index, value) in values.iter_mut().enumerate() {
-        let path = axes.get(index).map_or_else(
-            || indexed_path(path, index),
-            |axis| numeric_path(path, axis),
+        numbers.push(
+            component_path(path, axes, index),
+            number(std::mem::take(value)),
         );
-        numbers.push((path, number(std::mem::take(value))));
     }
 }
 
@@ -405,14 +544,51 @@ fn packed_components<const N: usize>(
     numbers: &mut Numbers,
 ) {
     for (index, value) in values.iter_mut().enumerate() {
-        components(
-            value,
-            axes,
-            &indexed_path(path, index),
-            numbers,
-            Number::Real,
-        );
+        real_components(value, N, axes, &indexed_path(path, index), numbers);
     }
+}
+
+fn real_components(
+    values: &mut [Real],
+    width: usize,
+    axes: &[&str],
+    path: &str,
+    numbers: &mut Numbers,
+) {
+    for (group, values) in values.chunks_exact_mut(width).enumerate() {
+        let scale = values
+            .iter()
+            .copied()
+            .map(finite_magnitude)
+            .fold(0.0, Real::max);
+        for (index, value) in values.iter_mut().enumerate() {
+            numbers.push(
+                component_path(path, axes, group * width + index),
+                Number::Component {
+                    value: std::mem::take(value),
+                    scale,
+                },
+            );
+        }
+    }
+}
+
+fn split_dict(dict: &Dict, path: &str, numbers: &mut Numbers) -> Dict {
+    let entries = dict
+        .entries()
+        .iter()
+        .enumerate()
+        .map(|(index, (key, value))| {
+            (
+                key.clone(),
+                split_numbers(value, &key_path(path, key, index), numbers),
+            )
+        })
+        .collect();
+    let mut projected = Dict::new(entries);
+    projected.key_type.clone_from(&dict.key_type);
+    projected.value_type.clone_from(&dict.value_type);
+    projected
 }
 
 // Keep the original shape with zeroes in numeric slots so the base comparer can report
@@ -423,7 +599,8 @@ fn split_numbers(value: &Variant, path: &str, numbers: &mut Numbers) -> Variant 
     const XYZ: &[&str] = &["x", "y", "z"];
     const XYZW: &[&str] = &["x", "y", "z", "w"];
     const RGBA: &[&str] = &["r", "g", "b", "a"];
-    let real = Number::Real;
+    numbers.record_path(path);
+    let real = Number::component;
     let int = |value| Number::Integer(i64::from(value));
     let mut discrete = match value {
         Array(array) => {
@@ -438,53 +615,41 @@ fn split_numbers(value: &Variant, path: &str, numbers: &mut Numbers) -> Variant 
                 items,
             ));
         }
-        Dict(dict) => {
-            let entries = dict
-                .entries()
-                .iter()
-                .enumerate()
-                .map(|(index, (key, value))| {
-                    (
-                        key.clone(),
-                        split_numbers(value, &key_path(path, key, index), numbers),
-                    )
-                })
-                .collect();
-            let mut projected = golf_sim_base::variant::Dict::new(entries);
-            projected.key_type.clone_from(&dict.key_type);
-            projected.value_type.clone_from(&dict.value_type);
-            return Dict(projected);
-        }
+        Dict(dict) => return Dict(split_dict(dict, path, numbers)),
         value => value.clone(),
     };
     match &mut discrete {
         Int(value) => {
-            numbers.push((path.into(), Number::Integer(value.value())));
+            numbers.push(path.into(), Number::Integer(value.value()));
             *value = 0.into();
         }
         Float(value) => {
-            numbers.push((path.into(), Number::Scalar(value.value())));
+            numbers.push(path.into(), Number::Scalar(value.value()));
             *value = 0.0.into();
         }
-        Vector2(v) => components(&mut v.values, XY, path, numbers, real),
-        Vector3(v) => components(&mut v.values, XYZ, path, numbers, real),
-        Vector4(v) | Quaternion(v) | Plane(v) => {
-            components(&mut v.values, XYZW, path, numbers, real)
-        }
+        Vector2(v) => real_components(&mut v.values, 2, XY, path, numbers),
+        Vector3(v) => real_components(&mut v.values, 3, XYZ, path, numbers),
+        Vector4(v) => real_components(&mut v.values, 4, XYZW, path, numbers),
+        Quaternion(v) | Plane(v) => components(&mut v.values, XYZW, path, numbers, real),
         Vector2i(v) => components(v, XY, path, numbers, int),
         Vector3i(v) => components(v, XYZ, path, numbers, int),
         Vector4i(v) => components(v, XYZW, path, numbers, int),
         Rect2i(v) => components(v, &[], path, numbers, int),
         Rect2(v) => components(&mut v.values, &[], path, numbers, real),
-        Transform2D(v) | Aabb(v) => components(&mut v.values, &[], path, numbers, real),
-        Basis(v) => components(&mut v.values, &[], path, numbers, real),
-        Transform3D(v) => components(&mut v.values, &[], path, numbers, real),
+        Transform2D(v) => real_components(&mut v.values, 2, &[], path, numbers),
+        Aabb(v) => components(&mut v.values, &[], path, numbers, real),
+        Basis(v) => real_components(&mut v.values, 3, &[], path, numbers),
+        Transform3D(v) => real_components(&mut v.values, 3, &[], path, numbers),
         Projection(v) => components(&mut v.values, &[], path, numbers, real),
         Color(v) => components(v, RGBA, path, numbers, real),
         PackedVector2Array(v) => packed_components(&mut v.values, XY, path, numbers),
         PackedVector3Array(v) => packed_components(&mut v.values, XYZ, path, numbers),
         PackedVector4Array(v) => packed_components(&mut v.values, XYZW, path, numbers),
-        PackedColorArray(v) => packed_components(v, RGBA, path, numbers),
+        PackedColorArray(v) => {
+            for (index, color) in v.iter_mut().enumerate() {
+                components(color, RGBA, &indexed_path(path, index), numbers, real);
+            }
+        }
         PackedFloat32Array(v) | PackedFloat64Array(v) => components(v, &[], path, numbers, real),
         PackedInt32Array(v) => components(v, &[], path, numbers, int),
         PackedInt64Array(v) => components(v, &[], path, numbers, Number::Integer),
@@ -494,28 +659,32 @@ fn split_numbers(value: &Variant, path: &str, numbers: &mut Numbers) -> Variant 
 }
 
 struct OutputFields {
-    expected: Numbers,
+    expected: Vec<(String, Number)>,
     actual: BTreeMap<String, Number>,
     discrete: Option<String>,
 }
 
 impl OutputFields {
     fn new(expected: &Variant, actual: &Variant) -> Self {
-        let mut expected_numbers = Numbers::new();
-        let mut actual_numbers = Numbers::new();
+        let mut expected_numbers = Numbers::default();
+        let mut actual_numbers = Numbers::default();
         let expected_discrete = split_numbers(expected, "$", &mut expected_numbers);
         let actual_discrete = split_numbers(actual, "$", &mut actual_numbers);
         Self {
-            expected: expected_numbers,
-            actual: actual_numbers.into_iter().collect(),
+            expected: expected_numbers.values,
+            actual: actual_numbers.values.into_iter().collect(),
             discrete: corpus::first_difference(&expected_discrete, &actual_discrete),
         }
     }
 
-    fn numeric(&self) -> impl Iterator<Item = (&str, Number, Number, Delta)> {
-        self.expected.iter().filter_map(|(field, expected)| {
+    fn numeric(
+        &self,
+        input_scale: impl Fn(&str) -> Real,
+    ) -> impl Iterator<Item = (&str, Number, Number, Delta)> {
+        self.expected.iter().filter_map(move |(field, expected)| {
             let actual = *self.actual.get(field)?;
-            Some((field.as_str(), *expected, actual, expected.delta(actual)?))
+            let delta = expected.delta(actual, input_scale(field))?;
+            Some((field.as_str(), *expected, actual, delta))
         })
     }
 }
@@ -526,56 +695,84 @@ fn compare_case(
     actual: &Variant,
     layer: &Layer,
     allow_discrete: bool,
-) -> Result<Option<Difference>, Difference> {
+    skipped: &[Departure],
+) -> CorpusResult<Option<Difference>> {
     let values = OnceCell::new();
     let values = || values.get_or_init(|| OutputFields::new(expected, actual));
-    let scalar_bounds = OnceCell::new();
+    let default = layer.default_bounds();
+    let scales = case.source_scales(layer, &default, values)?;
+    let input_scale = |path: &str| {
+        layer
+            .bounds_for(path)
+            .unwrap_or(&default)
+            .input_scale(&scales)
+    };
+    let measurements = OnceCell::new();
+    let measurements = || {
+        measurements.get_or_init(|| {
+            values()
+                .numeric(input_scale)
+                .map(|(field, expected, actual, delta)| (field, (expected, actual, delta)))
+                .collect::<BTreeMap<_, _>>()
+        })
+    };
     let tolerance = |path: &str| {
-        if let Some(bounds) = layer.bounds_for(path) {
-            return bounds.tolerance();
-        }
-        if let Some(limit) = layer.scalar_ulps {
-            let scalars = scalar_bounds.get_or_init(|| {
-                values()
-                    .numeric()
-                    .filter(|(_, expected, _, _)| matches!(expected, Number::Scalar(_)))
-                    .map(|(field, expected, actual, delta)| {
-                        let bounds = expected.within_ulps(actual, limit).then_some(Tolerance {
-                            absolute: delta.absolute,
-                            relative: 0.0,
-                        });
-                        (field, bounds)
-                    })
-                    .collect::<BTreeMap<_, _>>()
-            });
-            if let Some(bounds) = scalars.get(path) {
-                return *bounds;
+        let field = layer.bounds_for(path);
+        let bounds = field.unwrap_or(&default);
+        let scalar_ulps = layer.scalar_ulps.filter(|_| field.is_none());
+        let mut step_bound = None;
+        if (scalar_ulps.is_some() || bounds.f32_steps.is_some())
+            && let Some(&(expected, actual, delta)) = measurements().get(path)
+        {
+            if let Some(limit) = scalar_ulps
+                && matches!(expected, Number::Scalar(_))
+            {
+                if expected.within_ulps(actual, limit) {
+                    return Some(Tolerance {
+                        absolute: delta.absolute,
+                        relative: 0.0,
+                    });
+                }
+                // Preserve the legacy scalar ULP rule for rows without a step bound.
+                bounds.f32_steps?;
             }
+            // A passing step comparison can use the base comparer's absolute bound.
+            step_bound = bounds
+                .f32_steps
+                .filter(|limit| delta.steps <= *limit)
+                .map(|_| delta.absolute);
         }
-        layer.default_bounds().tolerance()
+        bounds.tolerance(step_bound)
+    };
+    let failure = |difference| -> Box<dyn StdError> {
+        CheckFailure {
+            difference,
+            skipped: skipped.to_vec(),
+        }
+        .into()
     };
     let Some(first) = corpus::first_difference_with(expected, actual, tolerance) else {
         return Ok(None);
     };
     let fields = values();
     if fields.discrete.as_deref() != Some(&first) {
-        let delta = fields
-            .numeric()
-            .find_map(|(path, _, _, delta)| (path == first).then_some(delta));
-        return Err(case.difference(&first, delta));
+        let delta = measurements()
+            .get(first.as_str())
+            .map(|&(_, _, delta)| delta);
+        return Err(failure(case.difference(&first, delta)));
     }
     let difference = case.difference(&first, None);
     if !allow_discrete {
-        return Err(difference);
+        return Err(failure(difference));
     }
     if !matches!(case.layer, "hole" | "round") {
-        for (path, expected, actual, delta) in fields.numeric() {
+        for (path, expected, actual, delta) in fields.numeric(input_scale) {
             if corpus::first_difference_with(&expected.variant(), &actual.variant(), |_| {
                 tolerance(path)
             })
             .is_some()
             {
-                return Err(case.difference(path, Some(delta)));
+                return Err(failure(case.difference(path, Some(delta))));
             }
         }
     }
@@ -677,7 +874,9 @@ pub fn check<E: fmt::Display>(
 ) -> CorpusResult<CheckReport> {
     let fixture = Fixture::read(path)?;
     fixture.require_layer(layer)?;
-    let limits = Layer::load(&fixture.testdata.join(TOLERANCES), layer)?;
+    let config = fixture.testdata.join(TOLERANCES);
+    let limits = Layer::load(&config, layer)?
+        .ok_or_else(|| format!("{}: no tolerances for layer {layer:?}", config.display()))?;
     let (cases, skipped) = fixture.selected_cases()?;
     let checked = cases.len();
     let mut discrete = Vec::new();
@@ -686,16 +885,14 @@ pub fn check<E: fmt::Display>(
         let actual = case.run(&mut run)?;
         let allow_discrete =
             (discrete.len() + 1) as Real / checked as Real <= limits.discrete_share;
-        match compare_case(&case, &expected, &actual, &limits, allow_discrete) {
-            Ok(discrete_difference) => discrete.extend(discrete_difference),
-            Err(difference) => {
-                return Err(CheckFailure {
-                    difference,
-                    skipped,
-                }
-                .into());
-            }
-        }
+        discrete.extend(compare_case(
+            &case,
+            &expected,
+            &actual,
+            &limits,
+            allow_discrete,
+            &skipped,
+        )?);
     }
     Ok(CheckReport {
         checked,
@@ -714,6 +911,7 @@ pub struct Maximum {
 pub struct FieldDrift {
     pub absolute: Maximum,
     pub relative: Maximum,
+    pub steps: Maximum,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -731,11 +929,13 @@ impl fmt::Display for DriftReport {
         for (field, drift) in &self.numeric {
             writeln!(
                 f,
-                "{field}: max abs {:e} (case {:?}), max rel {:e} (case {:?})",
+                "{field}: max abs {:e} (case {:?}), max rel {:e} (case {:?}), max steps {:e} (case {:?})",
                 drift.absolute.size,
                 drift.absolute.case_id,
                 drift.relative.size,
-                drift.relative.case_id
+                drift.relative.case_id,
+                drift.steps.size,
+                drift.steps.case_id
             )?;
         }
         for difference in &self.discrete {
@@ -753,6 +953,8 @@ impl Fixture {
         mut run: impl FnMut(&Dict) -> Result<Variant, E>,
     ) -> CorpusResult<DriftReport> {
         self.require_layer(layer)?;
+        let limits = Layer::load(&self.testdata.join(TOLERANCES), layer)?.unwrap_or_default();
+        let default = limits.default_bounds();
         let (cases, skipped) = self.selected_cases()?;
         let mut report = DriftReport {
             skipped,
@@ -762,7 +964,14 @@ impl Fixture {
             let expected = case.expected()?;
             let actual = case.run(&mut run)?;
             let fields = OutputFields::new(&expected, &actual);
-            for (field, _, _, delta) in fields.numeric() {
+            let scales = case.source_scales(&limits, &default, || &fields)?;
+            let input_scale = |path: &str| {
+                limits
+                    .bounds_for(path)
+                    .unwrap_or(&default)
+                    .input_scale(&scales)
+            };
+            for (field, _, _, delta) in fields.numeric(input_scale) {
                 let maximum = |size| Maximum {
                     size,
                     case_id: case.id().into(),
@@ -773,12 +982,16 @@ impl Fixture {
                     .or_insert_with(|| FieldDrift {
                         absolute: maximum(delta.absolute),
                         relative: maximum(delta.relative),
+                        steps: maximum(delta.steps),
                     });
                 if delta.absolute > drift.absolute.size {
                     drift.absolute = maximum(delta.absolute);
                 }
                 if delta.relative > drift.relative.size {
                     drift.relative = maximum(delta.relative);
+                }
+                if delta.steps > drift.steps.size {
+                    drift.steps = maximum(delta.steps);
                 }
             }
             if let Some(field) = fields.discrete {
