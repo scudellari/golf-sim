@@ -105,6 +105,15 @@ pub fn putt_capture_speed(lateral_offset_m: Real) -> Real {
     t::CUP_CAPTURE_SPEED * fm::pow((1.0 - offset * offset).max(0.0), t::CUP_CAPTURE_EXPONENT)
 }
 
+pub fn putt_capture_speed_on_slope(lateral_offset_m: Real, uphill_sine: Real) -> Real {
+    // Penner (2002), eq. 30. The far rim's rise reduces the required drop by
+    // one ball radius times the signed uphill sine. Bound the small-slope
+    // approximation at the steepest slope Penner quantified.
+    let max_sine = fm::sin(t::CUP_CAPTURE_MAX_SLOPE_RAD);
+    let drop_ratio = 1.0 - uphill_sine.clamp(-max_sine, max_sine);
+    putt_capture_speed(lateral_offset_m) / fm::sqrt(drop_ratio)
+}
+
 pub fn captures_flagstick_rebound(position: Vec3, velocity: Vec3, cup: Cup) -> bool {
     // The outgoing line can cross a shorter chord of the opening after a glancing hit.
     let lateral = xz(position - cup.position)
@@ -144,6 +153,17 @@ pub fn putt_entry<P: Probe>(
     ball_radius: Real,
     probe: &mut P,
 ) -> PuttEntry {
+    putt_entry_on_slope(position, velocity, cup, ball_radius, UP, probe)
+}
+
+pub(crate) fn putt_entry_on_slope<P: Probe>(
+    position: Vec3,
+    velocity: Vec3,
+    cup: Cup,
+    ball_radius: Real,
+    normal: Vec3,
+    probe: &mut P,
+) -> PuttEntry {
     let _span = log::cup().entered();
     let horizontal = Vec3::new(velocity.x, 0.0, velocity.z);
     let speed = horizontal.length();
@@ -151,7 +171,7 @@ pub fn putt_entry<P: Probe>(
     let to_centre = cup.position - position;
     let offset = Vec3::new(to_centre.x, 0.0, to_centre.z).slide(direction);
     let lateral = offset.length();
-    let capture_speed = putt_capture_speed(lateral);
+    let capture_speed = putt_capture_speed_on_slope(lateral, -normal.dot(direction));
 
     let outcome = if flagstick_hit(
         position,

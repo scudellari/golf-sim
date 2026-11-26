@@ -155,4 +155,4 @@ change = "physics 0.9.0: flagstick rim response"
 [[departure]]
 id = "values/000000"
 layer = "physics"
-change = "physics 0.9.0: flagstick rim response"
+change = "physics 0.10.0: cup capture on slopes"

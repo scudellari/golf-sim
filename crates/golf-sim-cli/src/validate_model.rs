@@ -359,7 +359,14 @@ fn capture(inputs: Inputs<'_>, conditions: &Conditions, air: &ConstantAir) -> Op
     let radius = t::CUP_RADIUS_M;
     let offset = inputs.number("offset_radii")? * radius;
     if inputs.0.measured.contains_key("capture_mps") {
-        return Some(numbers([("capture_mps", cup::putt_capture_speed(offset))]));
+        let grade = fm::sin(inputs.number("grade_deg").unwrap_or(0.0).to_radians());
+        let uphill_sine = match inputs.text("direction") {
+            Some("uphill") => grade,
+            Some("downhill") => -grade,
+            _ => 0.0,
+        };
+        let speed = cup::putt_capture_speed_on_slope(offset, uphill_sine);
+        return Some(numbers([("capture_mps", speed)]));
     }
     let stimp = conditions.green.stimp_ft;
     let rim = 2.0 - fm::sqrt(radius * radius - offset * offset);

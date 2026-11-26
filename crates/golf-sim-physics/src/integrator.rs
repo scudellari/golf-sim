@@ -14,7 +14,7 @@ use crate::{
     tunables as t,
     values::{
         BallSpec, Cup, EndReason, EventKind, Launch, ObstacleHit, ObstacleKind, ShotEvent,
-        ShotResult, Touchdown, Zone, xz,
+        ShotResult, Touchdown, UP, Zone, xz,
     },
 };
 
@@ -708,7 +708,19 @@ impl Run<'_> {
         let cup = self.cup.expect("rim crossing requires a cup");
         self.cup_entered = true;
         self.emit(EventKind::CupEntry);
-        match cup::putt_entry(self.position, self.velocity, cup, self.ball.radius_m, probe) {
+        let normal = if self.motion == Motion::Roll {
+            self.current_ground.normal
+        } else {
+            UP
+        };
+        match cup::putt_entry_on_slope(
+            self.position,
+            self.velocity,
+            cup,
+            self.ball.radius_m,
+            normal,
+            probe,
+        ) {
             cup::PuttEntry::Capture => self.start_cup_drop(probe),
             cup::PuttEntry::LipOut { velocity } => {
                 self.velocity = velocity;

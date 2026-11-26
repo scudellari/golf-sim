@@ -3,7 +3,7 @@
 use crate::values::{BallSpec, ClubCategory, ClubSpec, ObstacleKind};
 use golf_sim_base::{ClubId, Real, Surface, num::deg_to_rad};
 
-pub const VERSION: &str = "0.9.0";
+pub const VERSION: &str = "0.10.0";
 
 // Constants
 
@@ -190,6 +190,7 @@ pub const CUP_RADIUS_M: Real = 0.053975;
 pub const CUP_DEPTH_M: Real = 0.1016;
 pub const CUP_CAPTURE_SPEED: Real = 1.626;
 pub const CUP_CAPTURE_EXPONENT: Real = 1.02;
+pub const CUP_CAPTURE_MAX_SLOPE_RAD: Real = Real::to_radians(5.0);
 pub const CUP_LIP_MAX_DEFLECT_RAD: Real = 0.6;
 pub const CUP_LIP_SPEED_KEEP: Real = 0.75;
 
