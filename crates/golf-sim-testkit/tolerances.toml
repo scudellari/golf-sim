@@ -51,6 +51,12 @@ rel = 1e-5
 f32_steps = 8
 discrete_share = 0.0
 
+["stroke/delivery"]
+abs = 1e-6
+rel = 1e-5
+f32_steps = 8
+discrete_share = 0.0
+
 [stroke]
 abs = 0.0
 rel = 0.0
