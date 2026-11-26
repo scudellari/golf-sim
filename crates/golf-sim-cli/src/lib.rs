@@ -20,6 +20,12 @@ mod validate_model;
     about = "Play and check golf-sim rounds from the command line."
 )]
 struct Cli {
+    /// Write JSON log events to this file.
+    #[arg(long, global = true, value_name = "FILE")]
+    log: Option<std::path::PathBuf>,
+    /// Most verbose level to record.
+    #[arg(long, global = true, default_value = "info", value_name = "LEVEL")]
+    log_level: tracing_subscriber::filter::LevelFilter,
     #[command(subcommand)]
     command: Command,
 }
@@ -77,7 +83,7 @@ pub fn run(args: impl IntoIterator<Item = impl Into<OsString> + Clone>) -> ExitC
             return ExitCode::from(error.exit_code() as u8);
         }
     };
-    let outcome = match cli.command {
+    let run_command = || match cli.command {
         Command::Play(c) => cmd::play::run(c),
         Command::Replay(c) => cmd::replay::run(c),
         Command::Schema(c) => cmd::schema::run(c),
@@ -99,6 +105,7 @@ pub fn run(args: impl IntoIterator<Item = impl Into<OsString> + Clone>) -> ExitC
         Command::Sweep(c) => cmd::sweep::run(c),
         Command::Validate(c) => cmd::validate::run(c),
     };
+    let outcome = logging::with_log(cli.log.as_deref(), cli.log_level, run_command);
     match outcome {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
