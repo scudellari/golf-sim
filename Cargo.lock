@@ -289,6 +289,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "golf-sim",
+ "golf-sim-validate",
  "schemars",
  "serde",
  "serde_json",
@@ -367,9 +368,14 @@ dependencies = [
  "golf-sim-rules",
  "golf-sim-stroke",
  "golf-sim-swing",
+ "proc-macro2",
  "serde_json",
  "sha2",
 ]
+
+[[package]]
+name = "golf-sim-validate"
+version = "0.0.0"
 
 [[package]]
 name = "hashbrown"

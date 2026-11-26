@@ -12,13 +12,10 @@ publish.workspace = true
 name = "golf"
 path = "src/main.rs"
 
-[features]
-# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
-reference = ["golf-sim/reference"]
-
 [dependencies]
 golf-sim.workspace = true
-clap.workspace = true
+golf-sim-validate.workspace = true
+clap = { workspace = true, features = ["string"] }
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

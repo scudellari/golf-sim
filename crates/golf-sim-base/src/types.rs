@@ -5,34 +5,27 @@ use std::fmt;
 /// The core's scalar. The core computes in 64-bit floats.
 pub type Real = f64;
 
-/// The scalar of the engine-order vectors. The reference implementation stores vectors in single
-/// precision, so the `reference` configuration does too.
-#[cfg(not(feature = "reference"))]
-pub type Ef = f64;
-#[cfg(feature = "reference")]
-pub type Ef = f32;
-
 /// A plane vector. Its operations follow the engine's order of operations.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec2 {
-    pub x: Ef,
-    pub y: Ef,
+    pub x: Real,
+    pub y: Real,
 }
 
 /// A space vector, with y up. Its operations follow the engine's order of operations.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec3 {
-    pub x: Ef,
-    pub y: Ef,
-    pub z: Ef,
+    pub x: Real,
+    pub y: Real,
+    pub z: Real,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec4 {
-    pub x: Ef,
-    pub y: Ef,
-    pub z: Ef,
-    pub w: Ef,
+    pub x: Real,
+    pub y: Real,
+    pub z: Real,
+    pub w: Real,
 }
 
 /// A 3x3 matrix stored by rows, as the engine stores it.

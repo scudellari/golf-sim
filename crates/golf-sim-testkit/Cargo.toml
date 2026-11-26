@@ -8,10 +8,6 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[features]
-# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
-reference = ["golf-sim/reference"]
-
 [dependencies]
 golf-sim.workspace = true
 golf-sim-base.workspace = true
@@ -23,3 +19,6 @@ golf-sim-stroke.workspace = true
 golf-sim-rules.workspace = true
 sha2.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+proc-macro2.workspace = true

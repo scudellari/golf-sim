@@ -1,4 +1,4 @@
-use golf_sim_base::{ClubId, Ef, Surface};
+use golf_sim_base::{Basis, ClubId, Real, Surface, Vec2, Vec3, Vec4};
 
 #[test]
 fn club_ids_are_the_standard_bag_in_order() {
@@ -30,7 +30,22 @@ fn surfaces_keep_the_reference_enum_values_and_bundle_names() {
 }
 
 #[test]
-fn engine_order_vectors_are_single_precision_only_under_reference() {
-    let bytes = if cfg!(feature = "reference") { 4 } else { 8 };
-    assert_eq!(size_of::<Ef>(), bytes);
+fn engine_order_vectors_and_bases_preserve_double_precision() {
+    let value = 1.0 + f64::EPSILON;
+    let v2 = Vec2 { x: value, y: value };
+    let v3 = Vec3 {
+        x: value,
+        y: value,
+        z: value,
+    };
+    let v4 = Vec4 {
+        x: value,
+        y: value,
+        z: value,
+        w: value,
+    };
+    let basis = Basis { rows: [v3; 3] };
+    let components: [Real; 9] = [v2.x, v2.y, v3.x, v3.y, v3.z, v4.x, v4.y, v4.z, v4.w];
+    assert_eq!(components, [value; 9]);
+    assert_eq!(basis.rows, [v3; 3]);
 }

@@ -33,26 +33,18 @@ When `Cargo.lock` changes, run `just vendor` again.
 
 ## The determinism rules
 
-Every rule but the 64-bit one has a check that fails the build when you break it.
-
 | Rule | What to do | Check |
 | --- | --- | --- |
 | One maths library | Call every transcendental (`sin`, `atan2`, `exp`, `powf`, `sqrt` and the rest) through `golf_sim_base::fm`, which uses the `libm` crate. Never call the `f32` or `f64` method. | `disallowed-methods` in `clippy.toml` |
 | No fused multiply-add | Write `a * b + c`. Never call `mul_add`, and never set `target-cpu` or `target-feature`. | `disallowed-methods` in `clippy.toml` |
 | No hash order | Use `BTreeMap`, `BTreeSet` or a sorted `Vec`. | `disallowed-types` bans `HashMap` and `HashSet` |
 | No threads in the core | Only `golf-sim-cli` and `golf-sim-godot` may start a thread. Parallel work reduces in a fixed order. | `disallowed-methods` bans `std::thread::spawn` and `std::thread::scope`, and the `dependencies` test fails when a core crate depends on a thread pool |
-| 64-bit floats | Compute in `Real` (`f64`). Use `f32` only where a stored format has it, and widen it when you read it. | Review |
+| 64-bit floats | Compute in `Real` (`f64`). Use `f32` only where a stored format has it, and widen it when you read it. | The `no_f32` test in `golf-sim-testkit` scans core source files outside the codecs |
 | Paths and line endings do not matter | Join paths with `Path::join`, and hash bytes, never text. | `.gitattributes` keeps text at LF and fixtures binary |
 
 Clippy reads the nearest `clippy.toml` above a crate. `crates/golf-sim-cli` and `crates/golf-sim-godot` keep a copy of the workspace's file without the thread entries. If you change `clippy.toml`, change both copies. The `lint_config` test in `golf-sim-testkit` fails until they match, and it runs clippy on `crates/golf-sim-testkit/lint-fixture` to prove that each banned call is caught.
 
-## The `reference` feature
-
-Every crate has a `reference` feature for tests only. It makes the engine-order vectors single precision (`Ef` is `f32`) and lets `fm` call the platform's maths, so a ported unit can match the reference implementation bit for bit on macOS arm64. No release builds it. Code under `#[cfg(feature = "reference")]` is the only place where `fm` may call a banned method, with an `#[allow(clippy::disallowed_methods)]` on that call.
-
-```sh
-cargo test -p golf-sim-base --features reference
-```
+Compare the core's results with the reference implementation's recorded data within the stated tolerance for each layer.
 
 ## Where code goes
 

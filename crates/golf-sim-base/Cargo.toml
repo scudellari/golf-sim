@@ -8,10 +8,6 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[features]
-# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
-reference = []
-
 [dependencies]
 libm.workspace = true
 ruzstd.workspace = true

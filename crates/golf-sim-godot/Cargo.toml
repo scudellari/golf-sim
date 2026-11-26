@@ -11,10 +11,6 @@ publish.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
-reference = ["golf-sim/reference"]
-
 [dependencies]
 golf-sim.workspace = true
 godot.workspace = true
