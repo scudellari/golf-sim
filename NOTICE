@@ -1,0 +1,36 @@
+golf-sim
+Copyright 2026 the golf-sim authors. Licensed under the MIT licence or the Apache License 2.0,
+at your option. See LICENSE-MIT and LICENSE-APACHE.
+
+Third-party data
+
+The validation targets under testdata/validation/targets/ include data and values from the
+works below, each under the Creative Commons Attribution 4.0 International licence,
+https://creativecommons.org/licenses/by/4.0/. testdata/validation/targets/LICENCES.toml is the
+full ledger, with the terms of every source the targets cite.
+
+Data from J. Biber, T. Jones, A. Champneys, R. Green and R. Szalai, "Measurements and linearized models for golf ball bounce on a green", Sports Engineering (2023), https://doi.org/10.1007/s12283-023-00442-4, Online Resource 2, licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Changes: The two CSV files are unmodified. bib.json restates their rows in m/s and rad/s (columns times the ball radius 0.021335 m for velocity) and adds the earlier implementation's predictions.
+Files: bib.json, biber-2023/data_campaignA.csv, biber-2023/data_campaignB.csv.
+
+Lift fit from Lyu, Kensrud, Smith and Tosaya, "Aerodynamics of golf balls in still air", Proceedings 2(6) 238 (2018), https://doi.org/10.3390/proceedings2060238, CC BY 4.0.
+Changes: Values computed from the published fit Cl = -3.25 S^2 + 1.99 S at three spin ratios.
+Files: lyu18.json.
+
+Lift coefficients from Li, Tsubokura and Tsunoda, Flow Turbulence Combust 99(3) 837-864 (2017), https://doi.org/10.1007/s10494-017-9859-1, CC BY 4.0.
+Changes: Three values taken from the text.
+Files: li17.json.
+
+Face-angle shares from Wood, Henrikson and Broadie, Proceedings 2(6) 249 (2018), https://doi.org/10.3390/proceedings2060249, CC BY 4.0.
+Changes: Three means and confidence intervals taken from the text.
+Files: ping.json.
+
+Cup outcomes from Hogan and Antali, "Mechanics of the golf lip out", R. Soc. Open Sci. 12(11) 250907 (2025), https://doi.org/10.1098/rsos.250907, CC BY 4.0. The centre capture speed is Holmes (1991) as quoted there.
+Changes: Values read from figures 5 and 7 and the text.
+Files: c1.json, c2.json.
+
+Third-party code
+
+Each crate golf-sim builds on carries its own licence, listed in Cargo.lock and checked by
+cargo-deny against deny.toml. The godot crates (godot-rust) are under the Mozilla Public
+License 2.0; their source is at https://github.com/godot-rust/gdext.

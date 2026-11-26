@@ -1,0 +1,40 @@
+# The licences golf-sim may build on, checked with `cargo deny check licenses sources` on every push.
+# golf-sim is MIT OR Apache-2.0 and must stay usable in a closed-source commercial game, so only
+# permissive licences are allowed. The one copyleft licence, MPL-2.0, is allowed for the godot-rust
+# crates alone: it is file-level, golf-sim changes none of their files, and their source stays public.
+
+[graph]
+all-features = true
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.93
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "godot" },
+    { allow = ["MPL-2.0"], crate = "godot-bindings" },
+    { allow = ["MPL-2.0"], crate = "godot-cell" },
+    { allow = ["MPL-2.0"], crate = "godot-codegen" },
+    { allow = ["MPL-2.0"], crate = "godot-core" },
+    { allow = ["MPL-2.0"], crate = "godot-ffi" },
+    { allow = ["MPL-2.0"], crate = "godot-macros" },
+    { allow = ["MPL-2.0"], crate = "gdextension-api" },
+]
+
+[licenses.private]
+ignore = false
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
