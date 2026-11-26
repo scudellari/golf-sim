@@ -73,11 +73,11 @@ jobs:
           PY
       - name: Fetch locked dependencies
         run: cargo fetch --locked
-      - uses: mlugg/setup-zig@v2 # TODO(dispatcher): pin to a commit
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         if: matrix.platform == 'linux'
         with:
           version: '0.14.1'
-      - uses: taiki-e/install-action@v2 # TODO(dispatcher): pin to a commit
+      - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         if: matrix.platform == 'linux'
         with:
           tool: cargo-zigbuild@0.20.1
