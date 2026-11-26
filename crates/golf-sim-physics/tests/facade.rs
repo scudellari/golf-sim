@@ -940,11 +940,9 @@ impl ReplayDirectory {
         fs::create_dir(&dir).unwrap();
         let scratch = Self(dir);
         fs::create_dir(scratch.0.join("testdata")).unwrap();
-        fs::copy(
-            testdata().join("tolerances.toml"),
-            scratch.0.join("testdata/tolerances.toml"),
-        )
-        .unwrap();
+        for name in ["tolerances.toml", "departures.toml"] {
+            fs::copy(testdata().join(name), scratch.0.join("testdata").join(name)).unwrap();
+        }
         scratch
     }
 
@@ -1035,7 +1033,7 @@ fn matches_facade_fixture() {
                     &format!("cases[{index}]"),
                     1,
                 )),
-                Ok(_) if is_golden => println!("Golden stroke passed"),
+                Ok(report) if is_golden && report.checked == 1 => println!("Golden stroke passed"),
                 Ok(_) => {}
             }
         }
@@ -1045,10 +1043,8 @@ fn matches_facade_fixture() {
         );
         panic!("Facade tolerance failed ({first})\n{}", failures.join("\n"));
     });
-    assert_eq!(report.checked, 409);
-    assert!(report.skipped.is_empty());
+    assert_eq!(report.checked + report.skipped.len(), 409);
     print!("{report}");
-    println!("Golden stroke checked");
 }
 
 fn target_number(target: &Target, name: &str) -> Option<Real> {

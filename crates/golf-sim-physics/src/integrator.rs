@@ -62,6 +62,7 @@ struct Run<'a> {
     max_vertical_radius: Real,
     options: Options,
     cup: Option<Cup>,
+    flagstick_restitution: Real,
     cup_entered: bool,
     crossing_to_stick: bool,
     zone: Zone,
@@ -88,6 +89,26 @@ pub fn run<P: Probe>(
     conditions: &dyn AirSampler,
     ground: &dyn GroundSampler,
     cup: Option<Cup>,
+    options: Options,
+    probe: &mut P,
+) -> ShotResult {
+    run_with_flagstick(
+        launch,
+        ball,
+        conditions,
+        ground,
+        cup.map(|cup| (cup, t::FLAGSTICK_RESTITUTION)),
+        options,
+        probe,
+    )
+}
+
+pub(crate) fn run_with_flagstick<P: Probe>(
+    launch: &Launch,
+    ball: &BallSpec,
+    conditions: &dyn AirSampler,
+    ground: &dyn GroundSampler,
+    cup: Option<(Cup, Real)>,
     options: Options,
     probe: &mut P,
 ) -> ShotResult {
@@ -136,7 +157,10 @@ pub fn run<P: Probe>(
         maximum_grade,
         max_vertical_radius,
         options,
-        cup: cup.filter(|c| c.position.is_finite()),
+        cup: cup
+            .map(|(cup, _)| cup)
+            .filter(|cup| cup.position.is_finite()),
+        flagstick_restitution: cup.map_or(t::FLAGSTICK_RESTITUTION, |(_, restitution)| restitution),
         cup_entered: false,
         crossing_to_stick: false,
         zone: if ground.has_zones() {
@@ -321,7 +345,7 @@ impl Run<'_> {
         drop(_span);
         if let Some(hit) = hit.filter(|hit| hit.fraction == fraction) {
             self.position += hit.normal * t::CONTACT_SLOP_M;
-            self.obstacle_response(hit);
+            self.obstacle_response(hit, *t::obstacle(hit.kind));
             if hit.kind == ObstacleKind::CupRim {
                 self.emit(EventKind::LipOut);
                 self.trace_cup("airborne_lip_out_s", probe);
@@ -623,14 +647,23 @@ impl Run<'_> {
         // Test the rebound against the surface at the hit, which can differ from the step's start.
         let normal = self.current_ground.normal;
         self.position += hit.normal * t::CONTACT_SLOP_M;
-        self.obstacle_response(hit);
+        let props = if hit.kind == ObstacleKind::Flagstick {
+            t::ObstacleProperties {
+                cor: self.flagstick_restitution,
+                friction: t::FLAGSTICK_TANGENTIAL_FRICTION,
+            }
+        } else {
+            *t::obstacle(hit.kind)
+        };
+        self.obstacle_response(hit, props);
         self.emit(EventKind::Obstacle);
         self.motion = Motion::Skid;
         if hit.kind == ObstacleKind::Flagstick {
             self.trace_cup("flagstick_contact_s", probe);
             if self.crossing_to_stick {
                 self.crossing_to_stick = false;
-                if self.velocity.length() <= t::CUP_CAPTURE_SPEED {
+                let cup = self.cup.expect("stick crossing requires a cup");
+                if cup::captures_flagstick_rebound(self.position, self.velocity, cup) {
                     self.start_cup_drop(probe);
                 }
             }
@@ -726,7 +759,7 @@ impl Run<'_> {
             self.position.y = hit.point.y;
             self.position += hit.normal * t::CONTACT_SLOP_M;
             self.time += (next - elapsed) * hit.fraction;
-            self.obstacle_response(hit);
+            self.obstacle_response(hit, *t::obstacle(hit.kind));
             self.emit(EventKind::Obstacle);
             self.phase = Phase::Flight;
             self.current_ground = self.ground_at(self.position);
@@ -775,8 +808,7 @@ impl Run<'_> {
         hit
     }
 
-    fn obstacle_response(&mut self, hit: ObstacleHit) {
-        let props = t::obstacle(hit.kind);
+    fn obstacle_response(&mut self, hit: ObstacleHit, props: t::ObstacleProperties) {
         let normal = hit.normal;
         let incoming = self.velocity.dot(normal);
         if incoming >= 0.0 {

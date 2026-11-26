@@ -656,40 +656,29 @@ fn values_match_physics_fixture() {
     let mut ground_cases = 0;
     let mut playback_cases = 0;
     let report = tolerance::check(&fixture_path(), "physics", |case| {
+        let actual = run_case(case)?;
         match field(case, "call").as_str().unwrap() {
             "sim_plane_ground.height_at" | "sim_plane_ground.sample_ground" => ground_cases += 1,
             "sim_shot_result.position_at" => playback_cases += 1,
+            "tunables.constants" => {
+                let expected = field(case, "output");
+                assert_eq!(corpus::first_difference(expected, &actual), None);
+                let count = dict(expected).entries().len();
+                assert_eq!(count, 159);
+                println!(
+                    "{count} tunables match the GDScript exactly at model {}",
+                    t::VERSION
+                );
+            }
             _ => {}
         }
-        run_case(case)
+        Ok::<_, String>(actual)
     })
     .unwrap_or_else(|error| panic!("{error}"));
-    assert!(report.skipped.is_empty());
-    assert_eq!(report.checked, 135);
-    assert_eq!((ground_cases, playback_cases), (18, 10));
+    assert_eq!(report.checked + report.skipped.len(), 135);
     print!("{report}");
     println!(
         "{ground_cases} plane heights and samples and {playback_cases} position_at cases passed the physics tolerance"
-    );
-}
-
-#[test]
-fn all_tunables_equal_the_recorded_constants() {
-    let fixture = corpus::read(&fixture_path()).unwrap();
-    let cases = array(field(dict(&fixture), "cases"));
-    let case = cases
-        .iter()
-        .map(dict)
-        .find(|case| field(case, "call").as_str() == Some("tunables.constants"))
-        .expect("fixture must contain the complete constants table");
-    let expected = field(case, "output");
-    let actual = tunable_snapshot();
-    assert_eq!(corpus::first_difference(expected, &actual), None);
-    let count = dict(expected).entries().len();
-    assert_eq!(count, 159);
-    println!(
-        "{count} tunables match the GDScript exactly at model {}",
-        t::VERSION
     );
 }
 

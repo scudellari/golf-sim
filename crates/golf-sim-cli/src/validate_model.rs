@@ -344,8 +344,17 @@ fn green_speed(
 
 fn capture(inputs: Inputs<'_>, conditions: &Conditions, air: &ConstantAir) -> Option<Quantities> {
     if inputs.0.measured.contains_key("holed_fraction") {
-        // The aggregate trials give neither a green speed nor individual putt offsets.
-        return Some(Quantities::new());
+        let (offset, stick) =
+            cup::PuttFlagstick::trial_cell(inputs.text("line")?, inputs.text("flagstick")?)?;
+        let ground = green(conditions, 10.0, 0.0);
+        let fraction = cup::replay_putts(
+            &ground,
+            air,
+            units::feet(inputs.number("past_ft")?),
+            offset,
+            stick,
+        )?;
+        return Some(numbers([("holed_fraction", fraction)]));
     }
     let radius = t::CUP_RADIUS_M;
     let offset = inputs.number("offset_radii")? * radius;

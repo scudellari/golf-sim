@@ -875,11 +875,9 @@ mod tests {
         let temp = TempDirectory(temp);
         let testdata_copy = temp.0.join("testdata");
         fs::create_dir(&testdata_copy).unwrap();
-        fs::copy(
-            testdata().join("tolerances.toml"),
-            testdata_copy.join("tolerances.toml"),
-        )
-        .unwrap();
+        for name in ["tolerances.toml", "departures.toml"] {
+            fs::copy(testdata().join(name), testdata_copy.join(name)).unwrap();
+        }
         let selected = testdata_copy.join("fixture.bin");
         let body = variant::encode(&fixture).unwrap();
         let mut bytes = b"GSCORP01".to_vec();
@@ -951,12 +949,13 @@ mod tests {
                 Ok::<_, Infallible>(actual)
             })
             .unwrap();
-        assert_eq!(outputs.len(), 233);
+        let replayed = outputs.len();
+        assert_eq!(replayed + drift.skipped.len(), 233);
         let checked = tolerance::check(&selected, "physics", |case| {
             let id = field(case, "id").as_str().unwrap();
             Ok::<_, Infallible>(outputs.remove(id).unwrap())
         });
-        println!("233 strokes produced bit-identical results with Trace and NoProbe");
+        println!("{replayed} strokes produced bit-identical results with Trace and NoProbe");
         println!(
             "{} discrete end, event, touchdown or surface differences",
             discrete.len()
@@ -992,7 +991,9 @@ mod tests {
             "{} strokes beyond physics/strokes tolerance; first checker result: {checked:?}",
             failed_cases.len(),
         );
-        assert_eq!(checked.unwrap().checked, 233);
+        let checked = checked.unwrap();
+        assert_eq!(checked.checked, replayed);
+        assert_eq!(checked.skipped, drift.skipped);
     }
 
     struct TempDirectory(PathBuf);

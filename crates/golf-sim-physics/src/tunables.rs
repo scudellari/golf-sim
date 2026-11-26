@@ -3,7 +3,7 @@
 use crate::values::{BallSpec, ClubCategory, ClubSpec, ObstacleKind};
 use golf_sim_base::{ClubId, Real, Surface, num::deg_to_rad};
 
-pub const VERSION: &str = "0.8.0";
+pub const VERSION: &str = "0.9.0";
 
 // Constants
 
@@ -199,6 +199,10 @@ pub const CANOPY_DRAG_PER_M: Real = 0.45;
 pub const CANOPY_SPIN_LOSS_PER_S: Real = 5.0;
 pub const FLAGSTICK_RADIUS_M: Real = 0.0095;
 pub const FLAGSTICK_HEIGHT_M: Real = 2.13;
+// Fitted to the MyGolfSpy putts tabled by Bilder on a stimp 8 plane.
+pub const FLAGSTICK_RESTITUTION: Real = 0.829;
+pub const FLAGSTICK_STIFF_RESTITUTION: Real = 0.828;
+pub const FLAGSTICK_TANGENTIAL_FRICTION: Real = 0.016;
 
 // Equipment
 

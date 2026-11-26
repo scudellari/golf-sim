@@ -1,3 +1,158 @@
 # Edit this table under testdata/ and copy it to crates/golf-sim-testkit/ for packaging.
 # Intentional departures from recorded results. Each [[departure]] has an id,
 # a layer, and a change (commit or version).
+
+[[departure]]
+id = "case/putt-holed-stick-true/000000"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "case/putt-holed-stick-true/000001"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/019/course chip h2/000020"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/019/course chip h2/000021"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/023/course chip h7/000019"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/023/course chip h7/000020"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/029/sweep h1 trip 0 putt 3.0/000018"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/029/sweep h1 trip 0 putt 3.0/000019"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/030/sweep h1 trip 0 putt 4.5/000008"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/030/sweep h1 trip 0 putt 4.5/000009"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/047/sweep h1 trip 3 putt 3.0/000017"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/047/sweep h1 trip 3 putt 3.0/000018"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/048/sweep h1 trip 3 putt 4.5/000007"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/048/sweep h1 trip 3 putt 4.5/000008"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/065/sweep h2 trip 0 putt 3.0/000017"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/065/sweep h2 trip 0 putt 3.0/000018"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/066/sweep h2 trip 0 putt 4.5/000007"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/066/sweep h2 trip 0 putt 4.5/000008"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/083/sweep h2 trip 3 putt 3.0/000017"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/083/sweep h2 trip 3 putt 3.0/000018"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/084/sweep h2 trip 3 putt 4.5/000008"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/084/sweep h2 trip 3 putt 4.5/000009"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/101/sweep h3 trip 0 putt 3.0/000018"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/101/sweep h3 trip 0 putt 3.0/000019"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/102/sweep h3 trip 0 putt 4.5/000006"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/102/sweep h3 trip 0 putt 4.5/000007"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/119/sweep h3 trip 3 putt 3.0/000013"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/119/sweep h3 trip 3 putt 3.0/000014"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/120/sweep h3 trip 3 putt 4.5/000007"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "lab/test-course/120/sweep h3 trip 3 putt 4.5/000008"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"
+
+[[departure]]
+id = "values/000000"
+layer = "physics"
+change = "physics 0.9.0: flagstick rim response"

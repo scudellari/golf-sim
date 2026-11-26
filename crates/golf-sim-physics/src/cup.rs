@@ -1,13 +1,16 @@
 //! Cup and flagstick contact for rolling and airborne shots.
 
 use golf_sim_base::{
-    Real, Vec3, fm, log,
-    trace::{Phase, Probe, Source},
+    Real, Seed, Vec3, fm, log,
+    seed::SeedStream,
+    trace::{NoProbe, Phase, Probe, Source},
 };
 
 use crate::{
+    integrator::{self, Options},
+    plane::{ConstantAir, PlaneGround},
     sweep, tunables as t,
-    values::{Cup, ObstacleHit, ObstacleKind, UP, xz},
+    values::{Cup, EndReason, Launch, LaunchReadout, ObstacleHit, ObstacleKind, UP, xz},
 };
 
 pub fn within(position: Vec3, cup: Vec3, radius: Real) -> bool {
@@ -100,6 +103,14 @@ pub fn rim_hit(from: Vec3, to: Vec3, cup: Vec3, radius: Real) -> Option<Obstacle
 pub fn putt_capture_speed(lateral_offset_m: Real) -> Real {
     let offset = lateral_offset_m / t::CUP_RADIUS_M;
     t::CUP_CAPTURE_SPEED * fm::pow((1.0 - offset * offset).max(0.0), t::CUP_CAPTURE_EXPONENT)
+}
+
+pub fn captures_flagstick_rebound(position: Vec3, velocity: Vec3, cup: Cup) -> bool {
+    // The outgoing line can cross a shorter chord of the opening after a glancing hit.
+    let lateral = xz(position - cup.position)
+        .slide(xz(velocity).normalized())
+        .length();
+    velocity.length() <= putt_capture_speed(lateral)
 }
 
 pub fn flagstick_hit(from: Vec3, to: Vec3, cup: Cup, ball_radius: Real) -> Option<ObstacleHit> {
@@ -224,4 +235,96 @@ pub fn putt_entry<P: Probe>(
         }
     }
     outcome
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PuttFlagstick {
+    Out,
+    In,
+    Stiff,
+}
+
+impl PuttFlagstick {
+    pub fn trial_cell(line: &str, flagstick: &str) -> Option<(Real, Self)> {
+        let offset = match line {
+            "centre" => 0.0,
+            // Bilder gives no offset for the off-centre putts.
+            "off-centre" => t::CUP_RADIUS_M * 0.5,
+            _ => return None,
+        };
+        let stick = match flagstick {
+            "out" => Self::Out,
+            "in" => Self::In,
+            "in-stiff" => Self::Stiff,
+            _ => return None,
+        };
+        Some((offset, stick))
+    }
+}
+
+/// Replays a MyGolfSpy cell on a plane. Calibrate the launch against the
+/// no-cup runout, then vary the entry line by 2 mm standard deviation.
+pub fn replay_putts(
+    ground: &PlaneGround,
+    air: &ConstantAir,
+    past_m: Real,
+    offset_m: Real,
+    flagstick: PuttFlagstick,
+) -> Option<Real> {
+    const START_M: Real = 2.0;
+    const PUTTS: u32 = 200;
+    let putt = |speed, offset, cup| {
+        let launch = Launch::from_readout(
+            &t::BALL,
+            Vec3::new(offset, 0.0, START_M),
+            Vec3::new(0.0, 0.0, -1.0),
+            LaunchReadout {
+                ball_speed_mps: speed,
+                spin_rate_rad_s: -speed / t::BALL.radius_m,
+                ..LaunchReadout::default()
+            },
+        );
+        integrator::run_with_flagstick(
+            &launch,
+            &t::BALL,
+            air,
+            ground,
+            cup,
+            Options {
+                playback: false,
+                ..Options::default()
+            },
+            &mut NoProbe,
+        )
+    };
+    let distance = START_M + past_m;
+    let (mut low, mut high) = (0.0, 4.0);
+    if !(0.0..=putt(high, 0.0, None).total_m()).contains(&distance) {
+        return None;
+    }
+    for _ in 0..40 {
+        let speed = (low + high) * 0.5;
+        if putt(speed, 0.0, None).total_m() < distance {
+            low = speed;
+        } else {
+            high = speed;
+        }
+    }
+    let speed = (low + high) * 0.5;
+    let cup = Cup {
+        position: Vec3::ZERO,
+        flagstick_in: flagstick != PuttFlagstick::Out,
+    };
+    let restitution = match flagstick {
+        PuttFlagstick::Out | PuttFlagstick::In => t::FLAGSTICK_RESTITUTION,
+        PuttFlagstick::Stiff => t::FLAGSTICK_STIFF_RESTITUTION,
+    };
+    let mut jitter = SeedStream::new(Seed(65));
+    let holed = (0..PUTTS)
+        .filter(|_| {
+            let offset = offset_m + 0.002 * jitter.next_gaussian();
+            putt(speed, offset, Some((cup, restitution))).end_reason == EndReason::Holed
+        })
+        .count();
+    Some(holed as Real / Real::from(PUTTS))
 }
