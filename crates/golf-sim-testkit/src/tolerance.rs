@@ -84,7 +84,7 @@ struct Layer {
 impl Layer {
     fn load(path: &Path, name: &str) -> CorpusResult<Option<Self>> {
         let mut layers: BTreeMap<String, Self> =
-            read_config(path, include_str!("../../../testdata/tolerances.toml"))?;
+            read_config(path, include_str!("../tolerances.toml"))?;
         let Some(layer) = layers.remove(name) else {
             return Ok(None);
         };
@@ -808,7 +808,7 @@ impl Fixture {
 
         let departures: Departures = read_config(
             &self.testdata.join(DEPARTURES),
-            include_str!("../../../testdata/departures.toml"),
+            include_str!("../departures.toml"),
         )?;
         let mut selected = Vec::new();
         let mut skipped = Vec::new();

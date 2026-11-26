@@ -1,3 +1,4 @@
+# Edit this table under testdata/ and copy it to crates/golf-sim-testkit/ for packaging.
 # Starting bounds from docs/design/core.md, with lengths in metres and times in seconds.
 # A number passes if it meets any bound on its row. f32_steps = k allows k × 2^-23 × s,
 # where s is the largest of 1, the expected magnitude (largest component for a vector),

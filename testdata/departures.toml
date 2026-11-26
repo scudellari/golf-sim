@@ -1,2 +1,3 @@
+# Edit this table under testdata/ and copy it to crates/golf-sim-testkit/ for packaging.
 # Intentional departures from recorded results. Each [[departure]] has an id,
 # a layer, and a change (commit or version).
