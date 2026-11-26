@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
  "golf-sim-conditions",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-base"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libm",
  "ruzstd",
@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "golf-sim",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-conditions"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
  "golf-sim-course",
@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-course"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
  "golf-sim-physics",
@@ -316,7 +316,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-godot"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "godot",
  "golf-sim",
@@ -324,14 +324,14 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-physics"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
 ]
 
 [[package]]
 name = "golf-sim-rules"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
  "golf-sim-course",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-stroke"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
  "golf-sim-conditions",
@@ -352,14 +352,14 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-swing"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim-base",
 ]
 
 [[package]]
 name = "golf-sim-testkit"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "golf-sim",
  "golf-sim-base",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "golf-sim-validate"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "hashbrown"

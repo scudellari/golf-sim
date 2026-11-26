@@ -345,7 +345,7 @@ Two workflows run on GitHub's hosted runners.
 
 | Platform | Runner | Target |
 | --- | --- | --- |
-| macOS | `macos-14` | `aarch64-apple-darwin` |
+| macOS | `macos-15` | `aarch64-apple-darwin` |
 | Linux | `ubuntu-latest` | `x86_64-unknown-linux-gnu`, built with `cargo zigbuild` against glibc 2.28 |
 | Windows | `windows-latest` | `x86_64-pc-windows-msvc` |
 

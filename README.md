@@ -4,7 +4,7 @@ A deterministic golf simulation in Rust. It covers ball flight, the strike, boun
 
 The same seed plays the same round on every platform. An AI agent can play a full round through the library or the command-line program, and a game engine can call the same core to draw the round and handle input for human players.
 
-This repository is new. The core is being built in phases, and the first code lands soon.
+The core is being built in phases. Version 0.1.0 is a foundation release with no physics yet. [CHANGELOG.md](CHANGELOG.md) says what is in each release.
 
 ## License
 
