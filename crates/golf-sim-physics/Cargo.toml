@@ -12,4 +12,5 @@ publish.workspace = true
 golf-sim-base.workspace = true
 
 [dev-dependencies]
+golf-sim-testkit.workspace = true
 golf-sim-validate.workspace = true

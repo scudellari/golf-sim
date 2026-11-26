@@ -16,4 +16,5 @@ golf-sim-conditions.workspace = true
 golf-sim-swing.workspace = true
 
 [dev-dependencies]
+golf-sim-testkit.workspace = true
 golf-sim-validate.workspace = true

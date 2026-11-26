@@ -266,6 +266,7 @@ dependencies = [
  "golf-sim-rules",
  "golf-sim-stroke",
  "golf-sim-swing",
+ "golf-sim-testkit",
  "schemars",
  "serde",
 ]
@@ -304,6 +305,7 @@ dependencies = [
  "golf-sim-base",
  "golf-sim-course",
  "golf-sim-physics",
+ "golf-sim-testkit",
 ]
 
 [[package]]
@@ -312,6 +314,7 @@ version = "0.1.0"
 dependencies = [
  "golf-sim-base",
  "golf-sim-physics",
+ "golf-sim-testkit",
 ]
 
 [[package]]
@@ -327,6 +330,7 @@ name = "golf-sim-physics"
 version = "0.1.0"
 dependencies = [
  "golf-sim-base",
+ "golf-sim-testkit",
  "golf-sim-validate",
 ]
 
@@ -338,6 +342,7 @@ dependencies = [
  "golf-sim-course",
  "golf-sim-physics",
  "golf-sim-stroke",
+ "golf-sim-testkit",
 ]
 
 [[package]]
@@ -349,6 +354,7 @@ dependencies = [
  "golf-sim-course",
  "golf-sim-physics",
  "golf-sim-swing",
+ "golf-sim-testkit",
  "golf-sim-validate",
 ]
 
@@ -357,6 +363,7 @@ name = "golf-sim-swing"
 version = "0.1.0"
 dependencies = [
  "golf-sim-base",
+ "golf-sim-testkit",
 ]
 
 [[package]]

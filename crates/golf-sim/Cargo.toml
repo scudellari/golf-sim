@@ -18,3 +18,6 @@ golf-sim-stroke.workspace = true
 golf-sim-rules.workspace = true
 serde.workspace = true
 schemars.workspace = true
+
+[dev-dependencies]
+golf-sim-testkit.workspace = true

@@ -13,3 +13,6 @@ golf-sim-base.workspace = true
 golf-sim-physics.workspace = true
 golf-sim-course.workspace = true
 golf-sim-stroke.workspace = true
+
+[dev-dependencies]
+golf-sim-testkit.workspace = true
