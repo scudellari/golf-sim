@@ -2,7 +2,7 @@
 
 golf-sim is a deterministic golf simulation in Rust. This document explains how the core is shaped, the rules that keep it deterministic, the formats it reads and writes, and the plan that builds it in small units. The decisions behind it are in [`docs/adr/`](../adr/README.md).
 
-Status: design, 2026-11-26. No code has landed yet. [Units](#units) lists the work.
+Status: in progress, 2026-11-26. The workspace, its stubs and the determinism lints have landed (C01). [Units](#units) lists the work.
 
 ## What the core does
 
@@ -228,7 +228,7 @@ A digest is the SHA-256 of a value's Variant bytes, where an object becomes a di
 
 ### Building
 
-The workspace needs Rust 1.94 or later. `cargo build` and `cargo test` work offline once the crates are fetched. To build where the network is closed, run `cargo vendor <dir>` with the network once and point Cargo at the folder with the `[source]` lines that `cargo vendor` prints. Put those lines in an untracked `.cargo/config.toml`, never in the repository.
+The workspace needs Rust 1.94 or later. `cargo build` and `cargo test` work offline once the crates are fetched. To build where the network is closed, run `just vendor <dir>` with the network once and point Cargo at the folder with the `[source]` lines it prints. Put those lines in an untracked `.cargo/config.toml`, never in the repository, and build with `--offline`. Run `just vendor` again whenever `Cargo.lock` changes. [CONTRIBUTING.md](../../CONTRIBUTING.md) has the steps.
 
 ### The release workflow
 
