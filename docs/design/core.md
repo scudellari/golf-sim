@@ -301,7 +301,7 @@ Where the earlier implementation is known to be off, the core may fix it: for ex
 
 New data and new models arrive the same way. A new source is a target file and a ledger entry. A new model of a phase, such as a different lift curve or a turf model with speed-dependent resistance, sits behind the same physics facade, and the residual report decides whether it replaces the current one.
 
-**The scorecard.** `testdata/validation/scorecard.toml` gives each dataset a sub-model (flight, impact, turf bounce, run-out and greens, the cup, the stroke) and a role: `fit` rows calibrate the model and `held-out` rows only score it. A scorecard row is a dataset with its source key, licence verdict, tolerance, role and residuals. A sub-model's score is the mean of its rows' residuals as a share of their tolerances, given separately for fit and held-out rows. `golf score` prints it, and the calibration fits only `fit` rows.
+**The scorecard.** Every target names its sub-model (flight, impact, turf bounce, run-out and greens, the cup, the stroke) and its role: `fit` targets calibrate the model and `held-out` targets only score it. A scorecard row is a source, a sub-model and a role, with the licence verdict from the ledger, the tolerance and the residuals. A target with neither a tolerance nor an earlier prediction is reported and never failed, and a `local` dataset is skipped when absent, like a `fetch` one. A sub-model's score is the mean of its rows' residuals as a share of their tolerances, given separately for fit and held-out rows. `golf score` prints it, and the calibration fits only `fit` rows.
 
 The first model changes of this kind are planned as units: the flagstick's rim response, cup capture on slopes, green bounce across the iron range, and lift capped near a spin ratio of 0.3. Each lands after the layer it changes has been ported and after the scorecard, and they land one after another because they share the tunables and the departures. Once a change lands, every later comparison with the earlier implementation carries its departures, so a later layer lists the cases the change moved rather than failing on them.
 
@@ -392,6 +392,8 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
 | [C64](https://github.com/scudellari/golf-sim/issues/63) | Single-precision steps in the tolerance table | Shared base | codex | C48 | ~150 |
+| [C69](https://github.com/scudellari/golf-sim/issues/68) | Move the workflows' actions off the Node.js 20 runtime | Release | codex | C62 | ~40 |
+| [C70](https://github.com/scudellari/golf-sim/issues/69) | Keep the testkit's embedded tables inside its crate | Shared base | codex | C64 | ~120 |
 | [C08](https://github.com/scudellari/golf-sim/issues/9) | Course data: typed parse and grids | Course | codex | C05, reference data from the consuming game, C48, C64 | ~550 |
 | [C10](https://github.com/scudellari/golf-sim/issues/10) | Physics values, sampler traits, the plane ground and constant air | Physics solver | codex | C02, C03, reference data from the consuming game, C48, C56, C57, C64 | ~550 |
 | [C09](https://github.com/scudellari/golf-sim/issues/11) | Course obstacles, zone map, legal map and the stance footprint | Course | codex | C08, C03, C10 | ~550 |
@@ -405,7 +407,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C18](https://github.com/scudellari/golf-sim/issues/19) | The stroke facade, `golf stroke` and `golf course check` | World and stroke | codex | C17 | ~500 |
 | [C54](https://github.com/scudellari/golf-sim/issues/58) | `golf validate`, `golf score`, `golf fit` and the calibration script | Tools | codex | C18, C53 | ~560 |
 | [C58](https://github.com/scudellari/golf-sim/issues/59) | `golf explain` and stroke repros | Tools | codex | C54 | ~450 |
-| [C65](https://github.com/scudellari/golf-sim/issues/64) | The flagstick's rim response | Physics solver | codex | C12, C54, C58 | ~250 |
+| [C65](https://github.com/scudellari/golf-sim/issues/64) | The flagstick's rim response | Physics solver | codex | C12, C54, C58, C70 | ~250 |
 | [C66](https://github.com/scudellari/golf-sim/issues/65) | Cup capture on slopes | Physics solver | codex | C12, C54, C65 | ~200 |
 | [C67](https://github.com/scudellari/golf-sim/issues/66) | Green bounce across the iron range | Physics solver | codex | C12, C54, C66 | ~350 |
 | [C68](https://github.com/scudellari/golf-sim/issues/67) | Lift capped near spin ratio 0.3, then a refit | Physics solver | codex | C11, C54, C67 | ~300 |
