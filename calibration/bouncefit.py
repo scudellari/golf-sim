@@ -74,7 +74,7 @@ def fit(targets):
     names = ["BOUNCE_CRATER_SCALE", "BOUNCE_CRATER_MAX_DEG",
              "BOUNCE_TURF_FRICTION", "BOUNCE_TANGENTIAL_COR"]
     values = dict(zip(names, best))
-    # Two traditionally reported high-backspin green impacts, on separate days.
+    # The two unclassified Haake impacts anchor the rolling response.
     haake = []
     for row in targets.rows(("H",), "turf_impact"):
         inputs, measured = row["inputs"], fit_measurements(row)

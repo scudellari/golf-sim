@@ -3,7 +3,7 @@
 use crate::values::{BallSpec, ClubCategory, ClubSpec, ObstacleKind};
 use golf_sim_base::{ClubId, Real, Surface, num::deg_to_rad};
 
-pub const VERSION: &str = "0.10.0";
+pub const VERSION: &str = "0.11.0";
 
 // Constants
 
@@ -167,6 +167,20 @@ pub const BOUNCE_GREEN_MAX_DEG: Real = 13.50592;
 pub const BOUNCE_GREEN_COR_FLOOR: Real = 0.22676;
 pub const BOUNCE_GREEN_TANGENTIAL_COR: Real = 0.08786;
 // END FIT BOUNCE
+// BEGIN FIT GREEN BOUNCE
+pub const GREEN_IRON_TILT_DEG: Real = 24.84055;
+pub const GREEN_IRON_TILT_ANGLE: Real = -4.42348;
+pub const GREEN_IRON_TILT_SPEED: Real = 2.09928;
+pub const GREEN_IRON_TILT_FIRMNESS: Real = 17.77659;
+pub const GREEN_IRON_COR: Real = 0.12730;
+pub const GREEN_IRON_COR_ANGLE: Real = 0.01048;
+pub const GREEN_IRON_COR_ANGLE_SQUARED: Real = 0.03676;
+pub const GREEN_IRON_COR_FIRMNESS: Real = 0.05776;
+pub const GREEN_IRON_FRICTION: Real = 0.15163;
+pub const GREEN_IRON_FRICTION_ANGLE: Real = -0.01154;
+pub const GREEN_IRON_FRICTION_FIRMNESS: Real = 0.05500;
+pub const GREEN_IRON_FRICTION_SPEED_SQUARED: Real = 0.03060;
+// END FIT GREEN BOUNCE
 pub const BOUNCE_GREEN_CRATER_SCALE: Real = 1.4;
 pub const BOUNCE_GREEN_CAP_SOFTNESS: Real = 0.5;
 pub const BOUNCE_CRATER_SOFT_SCALE: Real = 1.5;

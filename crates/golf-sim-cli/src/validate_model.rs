@@ -281,6 +281,11 @@ fn turf(
     }
     let green = green(conditions, conditions.green.stimp_ft, 0.0);
     let ground = if inputs.text("surface") == Some("green") {
+        // The unclassified Haake rows use the nominal green and the same
+        // short launch into the turf as their earlier predictions.
+        if !inputs.0.id.starts_with("H.green") || inputs.text("green_class").is_some() {
+            return green_impact(inputs, green.sample_ground(0.0, 0.0));
+        }
         &green
     } else {
         ground
@@ -303,6 +308,47 @@ fn turf(
             fm::atan2(contact.velocity.y, horizontal(contact.velocity)).to_degrees(),
         ),
         ("out_spin_rad_s", contact.spin.x),
+    ]))
+}
+
+fn green_impact(inputs: Inputs<'_>, mut sample: GroundSample) -> Option<Quantities> {
+    use bounce::GreenClass::{Rolling, Slipping};
+
+    let class = match inputs.text("green_class") {
+        Some("rolling") => Rolling,
+        Some("slipping") | None => Slipping,
+        Some(_) => return None,
+    };
+    if let Some(stiffness) = inputs.number("stiffness_mpa") {
+        sample.firmness = bounce::green_firmness(stiffness);
+    } else if inputs.0.id.starts_with("SPIN07.") {
+        // Nominal firmness for the championship greens and the free-draining Ganton green.
+        sample.firmness = 1.0;
+    } else if inputs.0.id.starts_with("H.ganton.") {
+        sample.firmness = 0.8;
+    }
+    let speed = inputs.number("speed_mps")?;
+    let angle = inputs.number("angle_deg")?.to_radians();
+    let spin = inputs.number("spin_rad_s")?;
+    let velocity =
+        FORWARD * (speed * fm::cos(angle)) + Vec3::new(0.0, -speed * fm::sin(angle), 0.0);
+    let out = bounce::impact_with_green_class(
+        velocity,
+        Vec3::new(spin, 0.0, 0.0),
+        &sample,
+        &t::BALL,
+        class,
+        &mut NoProbe,
+    );
+    // R04 includes rebounds that travel back toward the tee.
+    let along = out.velocity.dot(FORWARD);
+    Some(numbers([
+        ("out_speed_mps", out.velocity.length()),
+        (
+            "out_angle_deg",
+            fm::atan2(out.velocity.y, along).to_degrees(),
+        ),
+        ("out_spin_rad_s", out.spin.x),
     ]))
 }
 
@@ -634,6 +680,8 @@ fn stock(inputs: Inputs<'_>, mut air: ConstantAir, ground: PlaneGround) -> Optio
 
 #[cfg(test)]
 mod tests {
+    use golf_sim_validate::{Role, Tolerance};
+
     use super::*;
 
     #[test]
@@ -642,5 +690,40 @@ mod tests {
         assert!(!report.targets.is_empty());
         let failures = failures(&report).collect::<Vec<_>>();
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn spin_report_held_out_angles_are_within_scatter() {
+        let report = report().unwrap();
+        let (fit, held_out): (Vec<_>, Vec<_>) = report
+            .targets
+            .iter()
+            .filter(|target| target.source == "SPIN07")
+            .partition(|target| target.role == Role::Fit);
+        assert_eq!(fit.len(), 6);
+        assert_eq!(held_out.len(), 2);
+        for name in ["out_speed_mps", "out_angle_deg", "out_spin_rad_s"] {
+            let fit_mae = fit
+                .iter()
+                .map(|target| target.quantities[name].residual.unwrap().abs())
+                .sum::<Real>()
+                / fit.len() as Real;
+            for row in &held_out {
+                let value = &row.quantities[name];
+                let Some(Tolerance::Sd(scatter)) = value.source_tolerance else {
+                    panic!("{} {name} has no stated scatter", row.id);
+                };
+                let error = value.residual.unwrap().abs();
+                assert!(
+                    error <= fit_mae + scatter,
+                    "{} {name}: {error} > {fit_mae} + {scatter}",
+                    row.id
+                );
+                println!(
+                    "{} {name}: |error| {error:.3}, fit MAE {fit_mae:.3}, scatter {scatter:.3}",
+                    row.id
+                );
+            }
+        }
     }
 }

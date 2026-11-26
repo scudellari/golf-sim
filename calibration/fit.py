@@ -16,6 +16,7 @@ from pathlib import Path
 
 from bouncefit import fit as fit_bounce
 from flightfit import COEFFICIENTS, fit as fit_flight, fly, launch
+from greenfit import fit as fit_green
 from targets import ROOT, Targets
 
 TUNABLES = Path("crates/golf-sim-physics/src/tunables.rs")
@@ -134,7 +135,11 @@ def main():
             impact = impact_block(original, invoke(command, targets, ROOT, "impact"))
             candidate = replace_block(candidate, "IMPACT", impact)
             candidate = replace_block(candidate, "AERO", format_constants(fit_flight(targets)))
-        candidate = replace_block(candidate, "BOUNCE", format_constants(fit_bounce(targets)))
+        bounce = fit_bounce(targets)
+        candidate = replace_block(candidate, "BOUNCE", format_constants(bounce))
+        candidate = replace_block(candidate, "GREEN BOUNCE", format_constants(fit_green(
+            targets, bounce["BOUNCE_GREEN_TANGENTIAL_COR"],
+        )))
 
         [stimp] = records(invoke(command, targets, ROOT, "runout"), "RUNOUT ")
         generated = replace_block(candidate, "RUNOUT", format_constants({"FAIRWAY_STIMP_M": stimp}))
@@ -157,7 +162,9 @@ def main():
             print("Calibration blocks updated.")
         else:
             check_parity(invoke(command, targets, ROOT, "parity"), targets, checked_aero(original))
-            reproduced = "BOUNCE and RUNOUT" if missing else "AERO, IMPACT, BOUNCE and RUNOUT"
+            reproduced = "BOUNCE, GREEN BOUNCE and RUNOUT"
+            if not missing:
+                reproduced = "AERO, IMPACT, " + reproduced
             print(f"Reproduced {reproduced}.")
     return 0
 

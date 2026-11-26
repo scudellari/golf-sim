@@ -18,6 +18,66 @@ pub struct Outcome {
     pub spin: Vec3,
 }
 
+/// How the green grips the ball during a loaded landing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GreenClass {
+    Rolling,
+    Slipping,
+}
+
+/// Maps a TruFirm stiffness in MPa onto the green's firmness scale.
+pub fn green_firmness(stiffness_mpa: Real) -> Real {
+    clampf(stiffness_mpa / 12.0, 0.0, 1.0)
+}
+
+struct GreenLanding {
+    load: Real,
+    tilt: Real,
+    cor: Real,
+    friction: Real,
+}
+
+impl GreenLanding {
+    fn slipping(
+        speed: Real,
+        normal_speed: Real,
+        descent_deg: Real,
+        ground: &GroundSample,
+        slipping: Real,
+    ) -> Option<Self> {
+        // The fit describes a loaded, oblique crater. Blend it out beyond the iron range.
+        let load = smoothstep(8.0, 12.0, normal_speed)
+            * smoothstep(22.0, 35.0, descent_deg)
+            * (1.0 - smoothstep(65.0, 90.0, descent_deg))
+            * slipping;
+        if load <= 0.0 {
+            return None;
+        }
+        let firmness = clampf(ground.firmness, 0.0, 1.0);
+        let firm = firmness - 0.5;
+        let angle = (clampf(descent_deg, 30.0, 65.0) - 45.0) / 10.0;
+        let pace = (clampf(speed, 15.0, 30.0) - 22.86) / 5.0;
+        let tilt_deg = t::GREEN_IRON_TILT_DEG
+            + t::GREEN_IRON_TILT_ANGLE * angle * (1.0 - firmness)
+            + t::GREEN_IRON_TILT_SPEED * pace
+            - t::GREEN_IRON_TILT_FIRMNESS * firm;
+        let cor = t::GREEN_IRON_COR + t::GREEN_IRON_COR_ANGLE * angle
+            - t::GREEN_IRON_COR_ANGLE_SQUARED * angle * angle
+            + t::GREEN_IRON_COR_FIRMNESS * firm;
+        let friction = t::GREEN_IRON_FRICTION
+            + t::GREEN_IRON_FRICTION_ANGLE * angle
+            + t::GREEN_IRON_FRICTION_FIRMNESS * firm
+            + t::GREEN_IRON_FRICTION_SPEED_SQUARED * pace * pace;
+        Some(Self {
+            load,
+            tilt: deg_to_rad(clampf(tilt_deg, 0.0, 35.0)),
+            cor: clampf(cor, 0.04, 0.4)
+                * (1.0 - t::BOUNCE_COR_WET_LOSS * clampf(ground.moisture, 0.0, 1.0)),
+            friction: clampf(friction, 0.01, t::surface(Surface::Green).friction),
+        })
+    }
+}
+
 fn crater_load(normal_speed: Real) -> Real {
     smoothstep(t::CRATER_ONSET_MPS, t::CRATER_FULL_LOAD_MPS, normal_speed)
 }
@@ -89,11 +149,45 @@ pub fn restitution(normal_speed: Real, ground: &GroundSample) -> Real {
 }
 
 /// Resolves one impact using metres per second and radians per second.
+/// The sampled green firmness controls the transition from rolling to slipping.
 pub fn impact<P: Probe>(
     velocity: Vec3,
     spin: Vec3,
     ground: &GroundSample,
     ball: &BallSpec,
+    probe: &mut P,
+) -> Outcome {
+    let slipping = if ground.surface == Surface::Green {
+        // Samplers without a green class use neutral firmness as the rolling baseline.
+        smoothstep(0.5, 0.8, ground.firmness)
+    } else {
+        0.0
+    };
+    resolve_impact(velocity, spin, ground, ball, slipping, probe)
+}
+
+/// Resolves an impact using a specified green class. Other surfaces ignore the class.
+pub fn impact_with_green_class<P: Probe>(
+    velocity: Vec3,
+    spin: Vec3,
+    ground: &GroundSample,
+    ball: &BallSpec,
+    green_class: GreenClass,
+    probe: &mut P,
+) -> Outcome {
+    let slipping = match green_class {
+        GreenClass::Rolling => 0.0,
+        GreenClass::Slipping => 1.0,
+    };
+    resolve_impact(velocity, spin, ground, ball, slipping, probe)
+}
+
+fn resolve_impact<P: Probe>(
+    velocity: Vec3,
+    spin: Vec3,
+    ground: &GroundSample,
+    ball: &BallSpec,
+    slipping: Real,
     probe: &mut P,
 ) -> Outcome {
     let _span = log::bounce().entered();
@@ -102,9 +196,23 @@ pub fn impact<P: Probe>(
     let tangent = velocity + normal * normal_speed;
     let tangent_speed = tangent.length();
     let speed = velocity.length();
+    let green_landing = if ground.surface == Surface::Green && slipping > 0.0 {
+        GreenLanding::slipping(
+            speed,
+            normal_speed,
+            rad_to_deg(fm::atan2(normal_speed, tangent_speed)),
+            ground,
+            slipping,
+        )
+    } else {
+        None
+    };
     let (plane, crater_tilt) = if tangent_speed > 1e-6 {
         let incidence = fm::atan2(tangent_speed, normal_speed);
         let tilt = crater_angle(speed, normal_speed, incidence, ground);
+        let tilt = green_landing
+            .as_ref()
+            .map_or(tilt, |landing| lerpf(tilt, landing.tilt, landing.load));
         let axis = normal.cross(tangent.normalized()).normalized();
         (normal.rotated(axis, -tilt), tilt)
     } else {
@@ -117,6 +225,9 @@ pub fn impact<P: Probe>(
 
     let props = t::surface(ground.surface);
     let cor = restitution(approach, ground);
+    let cor = green_landing
+        .as_ref()
+        .map_or(cor, |landing| lerpf(cor, landing.cor, landing.load));
     let normal_impulse = ball.mass_kg * (1.0 + cor) * approach;
     let contact = -plane * ball.radius_m;
     let slip = (velocity + spin.cross(contact)).slide(plane);
@@ -130,7 +241,10 @@ pub fn impact<P: Probe>(
     };
     let k = ball.inertia_factor;
     let to_roll = slip * (-(1.0 + tangent_cor) * ball.mass_kg * k / (1.0 + k));
-    let friction_limit = props.friction * normal_impulse;
+    let friction = green_landing.as_ref().map_or(props.friction, |landing| {
+        lerpf(props.friction, landing.friction, landing.load)
+    });
+    let friction_limit = friction * normal_impulse;
     let tangent_impulse = if to_roll.length() > friction_limit {
         to_roll.normalized() * friction_limit
     } else {
@@ -173,6 +287,10 @@ pub fn impact<P: Probe>(
             ("spin_out_z", out.spin.z, "rad/s"),
         ] {
             probe.value(name, value, unit, Source::Computed);
+        }
+        if let Some(landing) = green_landing {
+            probe.value("iron_landing_load", landing.load, "", Source::Computed);
+            probe.value("contact_friction", friction, "", Source::Computed);
         }
         probe.value(
             "surface",
