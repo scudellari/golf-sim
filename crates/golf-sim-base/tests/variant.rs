@@ -288,7 +288,6 @@ fn small_course_decodes_and_matches_its_manifest() {
 }
 
 #[test]
-#[ignore = "needs testdata/courses/test-course"]
 fn reference_course_decodes_and_matches_its_manifest() {
     check_course(&testdata().join("courses/test-course"));
 }

@@ -1,0 +1,23 @@
+{
+	"format": "links-lab-course",
+	"format_version": 1,
+	"bake_version": "0.5.0",
+	"baker_hash": "30aac96f9ab69006907df7edd18ddaa2d6b0ee8cb8540a9dabe719daa75f2734",
+	"source_hash": "2b5fa8ae5e6b89f5fcf4cc184f1200be9fbd48290665cf16d2dfcb328873eb00",
+	"course_id": "test-course",
+	"course_revision": "87f09f85a87d363c80110a6494f0aab75c1a92762011da89dfb20cb5db5ba6b4",
+	"holes": [
+		1,
+		2,
+		3
+	],
+	"files": [
+		{
+			"path": "course.payload",
+			"sha256": "4bda62caa7c5807169463b7ca0d2a8a6d1250f582819e0b82dde20faefbb6c5a",
+			"bytes": 1809153,
+			"uncompressed_bytes": 4771976,
+			"compression": "zstd"
+		}
+	]
+}
