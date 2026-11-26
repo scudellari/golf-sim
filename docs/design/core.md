@@ -157,7 +157,7 @@ The crates follow the dependency order of the domain, so the compiler enforces w
 | `golf-sim-rules` | The hole's rules state, rulings, relief | base, physics, course, stroke |
 | `golf-sim` | `Hole`, `Round`, `Action`, records, observation, the console, the range | every crate above |
 | `golf-sim-validate` | The measured-data targets, the licence ledger and the residual report | nothing |
-| `golf-sim-cli` | The `golf` program, repro bundles, `explain`, sweeps and scenarios | golf-sim, golf-sim-validate |
+| `golf-sim-cli` | The `golf` program, repro bundles, `explain`, sweeps and scenarios | golf-sim, golf-sim-validate, golf-sim-testkit (for `golf corpus`) |
 | `golf-sim-godot` | The Godot binding, a `cdylib` | golf-sim |
 | `golf-sim-testkit` | The determinism suite, the tolerance comparisons, the fixture loaders and the earlier implementation's record decoders, for tests only | golf-sim |
 
@@ -284,6 +284,8 @@ The earlier implementation computes vectors in single precision and takes its tr
 | The hole and the round | Compared as rulings, prompts and stroke counts | 0.5% of holes, each listed |
 | The generator and the analysis | 1e-4 relative | 1% of seeds, each listed |
 
+**Single-precision reference data.** A value the earlier implementation passed through a vector or a packed float array was rounded to single precision, so its error grows with the size of the numbers it came from. A tolerance against such data is written in single-precision steps of the operands' magnitude: a number may differ by k × 2^-23 × s, where s is max(1, the largest magnitude among the operands and the result), never by one fixed absolute bound. The maths tests use 8 steps for a vector operation and the geometry tests 4 steps of the largest coordinate. `testdata/tolerances.toml` states the rule as `f32_steps = k` on a layer or field row, with `scale_from` naming the input paths whose magnitude enters s, and a number passes when it is within any of its row's bounds.
+
 These are starting values. A unit may tighten its layer's row when its drift report shows room. Widening a row needs a drift report that shows the difference comes from precision, posted with the change.
 
 A discrete difference comes from a threshold: a putt that dies on the lip in one implementation drops in the other. The comparison of a hole stops at the first stroke whose discrete result differs, and the test lists it. Traces of the console compare every stamp, discrete fields exactly, until such a stroke.
@@ -293,11 +295,15 @@ A discrete difference comes from a threshold: a putt that dies on the lip in one
 Where the earlier implementation is known to be off, the core may fix it: for example the 4- through 9-iron Stock carries that fall 5.5 to 9.9 yd short, or the lift that saturates at high spin. A model change lands this way:
 
 1. Raise the physics version.
-2. Show the residual report before and after with `golf validate --json`. No target may fail, and the targets the change is for must improve.
+2. Show the scorecard before and after with `golf score --against <before.json>`, where the before file comes from the parent commit. No target may fail, the rows the change is for must improve, and no row may get worse beyond its tolerance.
 3. List each fixture case that now leaves its tolerance in `testdata/departures.toml`, with the change that moved it. The corpus check skips listed cases.
 4. Store the determinism suite's affected layers again.
 
-New data and new models arrive the same way. A new source is a target file and a ledger entry. A new model of a phase, such as a different lift curve or a turf model with speed-dependent resistance, sits behind the same physics facade, and the residual report decides whether it replaces the current one. A survey of the models, data and libraries that would make the physics more realistic is under way, and its findings become units of this kind.
+New data and new models arrive the same way. A new source is a target file and a ledger entry. A new model of a phase, such as a different lift curve or a turf model with speed-dependent resistance, sits behind the same physics facade, and the residual report decides whether it replaces the current one.
+
+**The scorecard.** `testdata/validation/scorecard.toml` gives each dataset a sub-model (flight, impact, turf bounce, run-out and greens, the cup, the stroke) and a role: `fit` rows calibrate the model and `held-out` rows only score it. A scorecard row is a dataset with its source key, licence verdict, tolerance, role and residuals. A sub-model's score is the mean of its rows' residuals as a share of their tolerances, given separately for fit and held-out rows. `golf score` prints it, and the calibration fits only `fit` rows.
+
+The first model changes of this kind are planned as units: the flagstick's rim response, cup capture on slopes, green bounce across the iron range, and lift capped near a spin ratio of 0.3. Each lands after the layer it changes has been ported and after the scorecard, and they land one after another because they share the tunables and the departures. Once a change lands, every later comparison with the earlier implementation carries its departures, so a later layer lists the cases the change moved rather than failing on them.
 
 ## Formats
 
@@ -367,10 +373,10 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
 | [C01](https://github.com/scudellari/golf-sim/issues/1) | Workspace skeleton, shared types, determinism lints and offline builds | Shared base | codex | nothing | ~500 |
-| [C53](https://github.com/scudellari/golf-sim/issues/52) | The validation suite: measured targets, the licence ledger and the residual report | Shared base | codex | C48, reference data from the consuming game | ~350 |
-| [C02](https://github.com/scudellari/golf-sim/issues/2) | Maths: `fm`, engine-order vectors and the engine's built-ins | Maths and determinism | codex | C01, reference data from the consuming game | ~550 |
-| [C03](https://github.com/scudellari/golf-sim/issues/3) | Plane geometry: point in polygon, nearest point, segment crossing, cell-run union | Maths and determinism | codex | C01, reference data from the consuming game | ~300 |
-| [C04](https://github.com/scudellari/golf-sim/issues/4) | Seeds: `Seed::derive` and `SeedStream` | Maths and determinism | codex | C01, reference data from the consuming game | ~180 |
+| [C53](https://github.com/scudellari/golf-sim/issues/52) | The validation suite: measured targets, the licence ledger, the residual report and the scorecard | Shared base | codex | C48, reference data from the consuming game | ~420 |
+| [C02](https://github.com/scudellari/golf-sim/issues/2) | Maths: `fm`, engine-order vectors and the engine's built-ins | Maths and determinism | codex | C01, reference data from the consuming game, C05 | ~550 |
+| [C03](https://github.com/scudellari/golf-sim/issues/3) | Plane geometry: point in polygon, nearest point, segment crossing, cell-run union | Maths and determinism | codex | C01, reference data from the consuming game, C05 | ~300 |
+| [C04](https://github.com/scudellari/golf-sim/issues/4) | Seeds: `Seed::derive` and `SeedStream` | Maths and determinism | codex | C01, reference data from the consuming game, C05, C02 | ~180 |
 | [C05](https://github.com/scudellari/golf-sim/issues/5) | Variant codec, ordered dictionary, bundle container and digests | Variant, bundle and records | codex | C01, reference data from the consuming game | ~550 |
 | [C06](https://github.com/scudellari/golf-sim/issues/6) | The determinism suite | Shared base | codex | C02, C04, C05 | ~250 |
 | [C48](https://github.com/scudellari/golf-sim/issues/7) | The tolerance table, the drift report and `golf corpus` | Shared base | codex | C05, C06, C63 | ~350 |
@@ -385,8 +391,9 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
-| [C08](https://github.com/scudellari/golf-sim/issues/9) | Course data: typed parse and grids | Course | codex | C05, reference data from the consuming game, C48 | ~550 |
-| [C10](https://github.com/scudellari/golf-sim/issues/10) | Physics values, sampler traits, the plane ground and constant air | Physics solver | codex | C02, C03, reference data from the consuming game, C48, C56, C57 | ~550 |
+| [C64](https://github.com/scudellari/golf-sim/issues/63) | Single-precision steps in the tolerance table | Shared base | codex | C48 | ~150 |
+| [C08](https://github.com/scudellari/golf-sim/issues/9) | Course data: typed parse and grids | Course | codex | C05, reference data from the consuming game, C48, C64 | ~550 |
+| [C10](https://github.com/scudellari/golf-sim/issues/10) | Physics values, sampler traits, the plane ground and constant air | Physics solver | codex | C02, C03, reference data from the consuming game, C48, C56, C57, C64 | ~550 |
 | [C09](https://github.com/scudellari/golf-sim/issues/11) | Course obstacles, zone map, legal map and the stance footprint | Course | codex | C08, C03, C10 | ~550 |
 | [C11](https://github.com/scudellari/golf-sim/issues/12) | Flight: atmosphere, aerodynamics and the flight step | Physics solver | codex | C10, C53 | ~300 |
 | [C12](https://github.com/scudellari/golf-sim/issues/13) | Ground contact: bounce, roll, the cup and solid sweep | Physics solver | codex | C10, C53 | ~400 |
@@ -396,14 +403,18 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C16](https://github.com/scudellari/golf-sim/issues/17) | The world on a constant day | World and stroke | codex | C09, C15, reference data from the consuming game | ~550 |
 | [C17](https://github.com/scudellari/golf-sim/issues/18) | Stroke setup: address, bag, tuning and delivery | World and stroke | codex | C16 | ~600 |
 | [C18](https://github.com/scudellari/golf-sim/issues/19) | The stroke facade, `golf stroke` and `golf course check` | World and stroke | codex | C17 | ~500 |
-| [C54](https://github.com/scudellari/golf-sim/issues/58) | `golf validate`, `golf fit` and the calibration script | Tools | codex | C18, C53 | ~500 |
+| [C54](https://github.com/scudellari/golf-sim/issues/58) | `golf validate`, `golf score`, `golf fit` and the calibration script | Tools | codex | C18, C53 | ~560 |
 | [C58](https://github.com/scudellari/golf-sim/issues/59) | `golf explain` and stroke repros | Tools | codex | C54 | ~450 |
+| [C65](https://github.com/scudellari/golf-sim/issues/64) | The flagstick's rim response | Physics solver | codex | C12, C54, C58 | ~250 |
+| [C66](https://github.com/scudellari/golf-sim/issues/65) | Cup capture on slopes | Physics solver | codex | C12, C54, C65 | ~200 |
+| [C67](https://github.com/scudellari/golf-sim/issues/66) | Green bounce across the iron range | Physics solver | codex | C12, C54, C66 | ~350 |
+| [C68](https://github.com/scudellari/golf-sim/issues/67) | Lift capped near spin ratio 0.3, then a refit | Physics solver | codex | C11, C54, C67 | ~300 |
 
 ### Phase 2. A hole on a constant day
 
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
-| [C19](https://github.com/scudellari/golf-sim/issues/20) | The swing meter's judgment | Swing and rules | codex | C02, C04, reference data from the consuming game, C48 | ~350 |
+| [C19](https://github.com/scudellari/golf-sim/issues/20) | The swing meter's judgment | Swing and rules | codex | C02, C04, reference data from the consuming game, C48, C64 | ~350 |
 | [C20](https://github.com/scudellari/golf-sim/issues/21) | Swings: an exact swing and seeded skill profiles | Swing and rules | codex | C19 | ~300 |
 | [C21](https://github.com/scudellari/golf-sim/issues/22) | Rules: rulings, prompts and the provisional ball | Swing and rules | codex | C18, C09, reference data from the consuming game | ~450 |
 | [C22](https://github.com/scudellari/golf-sim/issues/23) | Relief: areas, complete relief, abnormal conditions, drops and placement | Swing and rules | codex | C21, C03 | ~450 |
@@ -415,7 +426,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C27](https://github.com/scudellari/golf-sim/issues/29) | `golf play`, `golf replay` and `golf schema` | Hole, testing and CLI | codex | C26, C58 | ~500 |
 | [C28](https://github.com/scudellari/golf-sim/issues/30) | `golf batch` and the scripted golfer | Hole, testing and CLI | codex | C27 | ~350 |
 | [C55](https://github.com/scudellari/golf-sim/issues/60) | `golf sweep` and `golf scenario`: balance reports and expected results | Hole, testing and CLI | codex | C28, C58 | ~450 |
-| [C59](https://github.com/scudellari/golf-sim/issues/61) | Repro bundles: replay a failure, explain it, and turn it into a test | Hole, testing and CLI | codex | C55, C58 | ~400 |
+| [C59](https://github.com/scudellari/golf-sim/issues/61) | Repro bundles: replay a failure, explain it, and turn it into a test | Hole, testing and CLI | codex | C55, C58, C68 | ~400 |
 | [C60](https://github.com/scudellari/golf-sim/issues/62) | Debugging guide: breakpoints in the program and in Godot | Hole, testing and CLI | codex | C59 | ~150 |
 
 ### Phase 3. The person's console, headless
