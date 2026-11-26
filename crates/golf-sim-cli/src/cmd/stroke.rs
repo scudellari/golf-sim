@@ -1,22 +1,27 @@
 use std::{
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use clap::{Args, Subcommand};
 use golf_sim::{
-    base::{ClubId, Real, Seed, Vec3, fm, trace::NoProbe},
-    conditions::{grounds::CourseGround, wear::WearMarkKind, world::World},
+    base::{
+        ClubId, Real, Seed, Vec3,
+        bundle::{Bundle, BundleCourse, BundleFocus, BundleManifest},
+        fm,
+        trace::NoProbe,
+    },
+    conditions::{wear::WearMarkKind, world::World},
     course::course::Course,
     physics::{
         facade::standard_air,
-        plane::ConstantAir,
         values::{EndReason, EventKind, ShotEvent, Zone},
     },
     stroke::{
-        delivery::DeliveryInput,
+        repro::{ConstantDay, StrokeRepro, StrokeSeeds, StrokeSetup},
         results::{End, StrokeOutcome},
-        stroke::{self, StrokeInput},
+        stroke,
     },
 };
 use serde_json::{Value, json};
@@ -42,9 +47,18 @@ pub struct StrokeArgs {
     /// Tee id. Defaults to the middle tee when available.
     #[arg(long, value_name = "ID")]
     tee: Option<String>,
-    /// Compass bearing in degrees clockwise from north. Defaults to the tee's aim.
+    /// Compass bearing in degrees clockwise from north. Defaults to the tee's aim or toward the cup from --at.
     #[arg(long, value_name = "DEGREES", allow_negative_numbers = true)]
     aim: Option<Real>,
+    /// Play from these course coordinates instead of a tee.
+    #[arg(long, num_args = 2, value_names = ["X", "Z"], allow_negative_numbers = true, conflicts_with = "tee")]
+    at: Option<Vec<Real>>,
+    /// Set the judged swing power. Defaults to the stock swing.
+    #[arg(long)]
+    power: Option<Real>,
+    /// Save an exact replay of the stroke.
+    #[arg(long, value_name = "DIR")]
+    repro: Option<PathBuf>,
 }
 
 pub fn run(command: Command) -> Outcome {
@@ -72,6 +86,21 @@ fn play(args: StrokeArgs) -> Outcome {
             .find(|tee| tee.id == "middle")
             .unwrap_or(&hole.tees[0])
     };
+    let cup = hole
+        .pin_zones
+        .iter()
+        .filter(|zone| zone.position == "middle")
+        .chain(hole.pin_zones.iter())
+        .find_map(|zone| zone.cups.first().map(|cup| cup.position));
+    let start = if let Some(at) = &args.at {
+        let point = Vec3::new(at[0], 0.0, at[1]);
+        if !point.is_finite() {
+            return Err("--at requires finite course coordinates".into());
+        }
+        point
+    } else {
+        tee.position
+    };
     let aim = if let Some(degrees) = args.aim {
         if !degrees.is_finite() {
             return Err("--aim must be a finite compass bearing".into());
@@ -79,21 +108,16 @@ fn play(args: StrokeArgs) -> Outcome {
         let radians = degrees.rem_euclid(360.0).to_radians();
         Vec3::new(fm::sin(radians), 0.0, -fm::cos(radians))
     } else {
-        Vec3::new(tee.aim.x, 0.0, tee.aim.z).normalized()
+        let direction = if let (Some(_), Some(cup)) = (&args.at, cup) {
+            cup - start
+        } else {
+            tee.aim
+        };
+        Vec3::new(direction.x, 0.0, direction.z).normalized()
     };
     if !aim.is_finite() || aim == Vec3::ZERO {
-        return Err(format!(
-            "tee {:?} on hole {} has no horizontal aim",
-            tee.id, args.hole
-        )
-        .into());
+        return Err(format!("no horizontal aim on hole {}. Specify --aim", args.hole).into());
     }
-    let cup = hole
-        .pin_zones
-        .iter()
-        .filter(|zone| zone.position == "middle")
-        .chain(hole.pin_zones.iter())
-        .find_map(|zone| zone.cups.first().map(|cup| cup.position));
     let data = course.data();
     let mut air = standard_air();
     air.pressure_pa = World::station_pressure_pa(data.climate.altitude_m.unwrap_or(0.0));
@@ -117,27 +141,41 @@ fn play(args: StrokeArgs) -> Outcome {
         .as_ref()
         .and_then(|setup| setup.green_speed_m)
         .map_or(3.05, |[low, high]| (low + high) * 0.5);
-    let ground = CourseGround::new(&course, 0.5, 0.3, green_speed);
-    let world = World::on_course(ground, ConstantAir::new(air), cup, 9.0 * 3600.0);
-    let seed = Seed(args.seed);
-    let ball = stroke::place(tee.position, &world, seed.derive("tee"), &mut NoProbe);
-    let address = stroke::stock(club);
-    let lie = world.address_lie(ball, &stroke::footprint(club, &address), aim);
-    let input = StrokeInput::new(
-        DeliveryInput {
-            club,
-            address,
-            lie,
-            attempt_seed: seed.derive("attempt/0"),
+    let setup = StrokeSetup {
+        course_id: data.id.clone(),
+        course_revision: course.revision().into(),
+        hole: args.hole,
+        tee: args.at.is_none().then(|| tee.id.clone()),
+        start,
+        cup,
+        day: ConstantDay {
+            clock_s: 9.0 * 3600.0,
+            air,
+            firmness: 0.5,
+            moisture: 0.3,
+            green_speed_m: green_speed,
         },
+        seeds: StrokeSeeds::new(Seed(args.seed)),
+        club,
+        address: stroke::stock(club),
         aim,
-    );
-    let result = stroke::play(
-        &input,
-        stroke::nominal_execution(&input),
-        &world,
-        &mut NoProbe,
-    );
+    };
+    let world = setup.world(&course);
+    let input = setup.input(&world, &mut NoProbe);
+    let mut execution = stroke::nominal_execution(&input);
+    if let Some(power) = args.power {
+        if !(0.0..=1.1).contains(&power) {
+            return Err("--power must be between 0 and 1.1".into());
+        }
+        execution.power = power;
+    }
+    let result = stroke::play(&input, execution, &world, &mut NoProbe);
+    if let Some(dir) = &args.repro {
+        save_repro(
+            dir,
+            StrokeRepro::capture(setup, &input, execution, &result)?,
+        )?;
+    }
     let output = json!({
         "outcome": outcome_json(&result.outcome),
         "rest": point(result.outcome.rest),
@@ -148,6 +186,30 @@ fn play(args: StrokeArgs) -> Outcome {
     let mut stdout = io::stdout().lock();
     serde_json::to_writer(&mut stdout, &output)?;
     writeln!(stdout)?;
+    Ok(())
+}
+
+fn save_repro(dir: &Path, repro: StrokeRepro) -> Outcome {
+    let setup = &repro.setup;
+    let manifest = BundleManifest::new(
+        BundleCourse {
+            id: setup.course_id.clone(),
+            revision: setup.course_revision.clone(),
+            extra: Default::default(),
+        },
+        BundleFocus {
+            hole: Some(setup.hole),
+            stroke: 1,
+            extra: Default::default(),
+        },
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+        String::new(),
+    );
+    Bundle {
+        manifest,
+        record: repro.to_bytes()?,
+    }
+    .write(dir)?;
     Ok(())
 }
 
