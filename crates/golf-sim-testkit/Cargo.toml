@@ -1,0 +1,25 @@
+[package]
+name = "golf-sim-testkit"
+description = "The determinism suite and the fixture loaders, for tests only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
+reference = ["golf-sim/reference"]
+
+[dependencies]
+golf-sim.workspace = true
+golf-sim-base.workspace = true
+golf-sim-physics.workspace = true
+golf-sim-course.workspace = true
+golf-sim-conditions.workspace = true
+golf-sim-swing.workspace = true
+golf-sim-stroke.workspace = true
+golf-sim-rules.workspace = true
+sha2.workspace = true
+serde_json.workspace = true

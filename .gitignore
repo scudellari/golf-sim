@@ -1,3 +1,5 @@
-/target/
+target/
+# Machine-local Cargo settings, such as a vendored source or a target folder.
+/.cargo/config.toml
 Cargo.lock.bak
 .DS_Store

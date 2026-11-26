@@ -1,0 +1,9 @@
+# A crate outside the workspace that breaks each determinism rule. The lint_config test runs clippy
+# on it and requires a diagnostic on every line marked `// banned` and on no other line.
+[package]
+name = "lint-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]

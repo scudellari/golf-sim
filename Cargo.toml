@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/scudellari/golf-sim"
+publish = false
+
+[workspace.dependencies]
+golf-sim = { path = "crates/golf-sim" }
+golf-sim-base = { path = "crates/golf-sim-base" }
+golf-sim-physics = { path = "crates/golf-sim-physics" }
+golf-sim-course = { path = "crates/golf-sim-course" }
+golf-sim-conditions = { path = "crates/golf-sim-conditions" }
+golf-sim-swing = { path = "crates/golf-sim-swing" }
+golf-sim-stroke = { path = "crates/golf-sim-stroke" }
+golf-sim-rules = { path = "crates/golf-sim-rules" }
+
+# Every transcendental comes from here, on the soft-float path, through golf_sim_base::fm (ADR 0002).
+libm = { version = "=0.2.16", default-features = false, features = ["force-soft-floats"] }
+ruzstd = "0.9"
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip makes every double cross the JSON protocol exactly.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+clap = { version = "4", features = ["derive"] }
+schemars = "1"
+# No experimental-threads: every call into the core runs on Godot's main thread.
+godot = { version = "=0.5.6", features = ["api-4-7"] }

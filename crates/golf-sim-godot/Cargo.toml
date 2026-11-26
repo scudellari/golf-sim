@@ -1,0 +1,20 @@
+[package]
+name = "golf-sim-godot"
+description = "The Godot 4.7 binding of the golf-sim core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
+reference = ["golf-sim/reference"]
+
+[dependencies]
+golf-sim.workspace = true
+godot.workspace = true

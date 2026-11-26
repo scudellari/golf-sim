@@ -1,0 +1,9 @@
+# Text is stored and checked out with LF on every platform.
+* text=auto eol=lf
+
+# Fixtures are compared byte for byte, so git never converts them.
+testdata/** binary
+*.payload binary
+*.rec binary
+# Expected digests are JSON that people read in a diff.
+testdata/determinism/*.json text eol=lf diff merge

@@ -1,0 +1,24 @@
+[package]
+name = "golf-sim"
+description = "A deterministic golf simulation: holes, rounds, actions, records and the person's console."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
+reference = ["golf-sim-base/reference", "golf-sim-physics/reference", "golf-sim-course/reference", "golf-sim-conditions/reference", "golf-sim-swing/reference", "golf-sim-stroke/reference", "golf-sim-rules/reference"]
+
+[dependencies]
+golf-sim-base.workspace = true
+golf-sim-physics.workspace = true
+golf-sim-course.workspace = true
+golf-sim-conditions.workspace = true
+golf-sim-swing.workspace = true
+golf-sim-stroke.workspace = true
+golf-sim-rules.workspace = true
+serde.workspace = true
+schemars.workspace = true

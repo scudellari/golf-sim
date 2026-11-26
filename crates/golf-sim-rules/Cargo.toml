@@ -1,0 +1,19 @@
+[package]
+name = "golf-sim-rules"
+description = "The hole's rules state, rulings and relief."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Test-only: mirror the reference implementation (single-precision vectors, the platform's maths).
+reference = ["golf-sim-base/reference", "golf-sim-physics/reference", "golf-sim-course/reference", "golf-sim-stroke/reference"]
+
+[dependencies]
+golf-sim-base.workspace = true
+golf-sim-physics.workspace = true
+golf-sim-course.workspace = true
+golf-sim-stroke.workspace = true
