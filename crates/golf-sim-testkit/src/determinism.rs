@@ -20,30 +20,13 @@ impl Item {
 type Items = fn() -> Vec<Item>;
 type Digests = BTreeMap<String, String>;
 
-fn empty_items() -> Vec<Item> {
-    Vec::new()
-}
-
-// A layer's items() shadows the fallback as soon as its stub is filled.
-macro_rules! layer_items {
-    ($layer:ident) => {{
-        #[allow(unused_imports)]
-        use self::empty_items as items;
-        {
-            #[allow(unused_imports)]
-            use crate::items::$layer::*;
-            items as Items
-        }
-    }};
-}
-
 pub const LAYERS: &[(&str, Items)] = &[
     ("base", crate::items::base::items),
-    ("generator", layer_items!(generator)),
-    ("hands", layer_items!(hands)),
-    ("hole", layer_items!(hole)),
-    ("physics", layer_items!(physics)),
-    ("round", layer_items!(round)),
+    ("generator", crate::items::generator::items),
+    ("hands", crate::items::hands::items),
+    ("hole", crate::items::hole::items),
+    ("physics", crate::items::physics::items),
+    ("round", crate::items::round::items),
 ];
 
 pub fn fixture_dir() -> PathBuf {
