@@ -9,3 +9,5 @@ testdata/** binary
 testdata/determinism/*.json text eol=lf diff merge
 # The tolerance and departure tables are TOML that people read in a diff.
 testdata/*.toml text eol=lf diff merge
+# The validation targets and their licence ledger are text that people read in a diff.
+testdata/validation/** text eol=lf diff merge

@@ -1,0 +1,14 @@
+{
+ "format": 1,
+ "source": "LI17",
+ "citation": "Li, Tsubokura and Tsunoda (2017), large-eddy simulation of a spinning golf ball.",
+ "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC6044256",
+ "datasets": ["li-2017"],
+ "verdict": "commit",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "LI17.cl.re43000", "kind": "aero", "submodel": "flight", "use": "held-out", "inputs": {"spin_ratio": 0.1, "reynolds": 43000.0}, "measured": {"cl": 0.15}, "note": "Large-eddy simulation, not a measurement.", "earlier": {"via": "production", "predicted": {"cl": 0.17812958}, "residual": {"cl": 0.028129584}}},
+  {"id": "LI17.cl.re75000", "kind": "aero", "submodel": "flight", "use": "held-out", "inputs": {"spin_ratio": 0.1, "reynolds": 75000.0}, "measured": {"cl": -0.137}, "note": "Large-eddy simulation, not a measurement.", "earlier": {"via": "production", "predicted": {"cl": 0.17812958}, "residual": {"cl": 0.31512958}}},
+  {"id": "LI17.cl.re110000", "kind": "aero", "submodel": "flight", "use": "held-out", "inputs": {"spin_ratio": 0.1, "reynolds": 110000.0}, "measured": {"cl": 0.135}, "note": "Large-eddy simulation, not a measurement.", "earlier": {"via": "production", "predicted": {"cl": 0.17812958}, "residual": {"cl": 0.043129584}}}
+ ]
+}

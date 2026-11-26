@@ -1,0 +1,12 @@
+{
+ "format": 1,
+ "source": "HURRION",
+ "citation": "P. Hurrion, investigation into ten Anser-style putters: launch, speed, spin and roll.",
+ "url": "https://www.paulhurrion.com/media/investigation-into-ten-different-ping-anser-style-putters-and-the-effect-they-have-on-the-golf-ball-launch-speed-spin-and-roll/",
+ "datasets": ["web-figures"],
+ "verdict": "cite",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "HURRION.putter.6mph", "kind": "delivery", "submodel": "impact", "use": "held-out", "inputs": {"club": "putter", "club_mph": 6.0, "attack_deg": 0.0, "dynamic_loft_deg": 2.0}, "measured": {"launch_deg": 1.795, "speed_ratio": 1.64, "true_roll_in": 28.0}, "tolerance": {"launch_deg": {"range": [0.47, 3.12]}, "speed_ratio": {"range": [1.55, 1.73]}, "true_roll_in": {"range": [20.0, 36.0]}}, "note": "Robot tests of ten putters. The source gives ranges. Each measured value is its range's midpoint.", "earlier": {"via": "production", "predicted": {"launch_deg": 2.3393156, "speed_ratio": 1.6449703, "true_roll_in": 72.019776}, "residual": {"launch_deg": 0.54431557, "speed_ratio": 0.0049703305, "true_roll_in": 44.019776}}}
+ ]
+}

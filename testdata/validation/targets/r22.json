@@ -1,0 +1,12 @@
+{
+ "format": 1,
+ "source": "R22",
+ "citation": "USGA and The R&A, \"Launch conditions of male and female golfers of different skill levels\", tables 5 to 7.",
+ "url": "https://assets-us-01.kc-usercontent.com/c42c7bf4-dca7-00ea-4f2e-373223f80f76/9c26b0e0-5272-484b-9a33-a870f698e83c/R22-01%20Launch%20conditions%20of%20male%20and%20female%20golfers%20of%20different%20skill%20levels.pdf",
+ "datasets": ["randa-reports"],
+ "verdict": "cite",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "R22.male-category1.6iron", "kind": "stock_carry", "submodel": "stroke", "use": "held-out", "inputs": {"club": "6iron", "air_temp_c": 15.0, "altitude_m": 300.0}, "measured": {"ball_mph": 120.2, "launch_deg": 12.4, "spin_rpm": 5171.0, "carry_yd": 164.4}, "note": "Male Category 1 average, 1,341 golfers, at 85.7 mph club speed. The prediction is the Stock 6-iron of a 105 mph bag at 300 m and 15 C. Equipment and conditions differ.", "earlier": {"via": "production", "predicted": {"ball_mph": 117.6852, "launch_deg": 16.039608, "spin_rpm": 6434.7618, "carry_yd": 166.49215}, "residual": {"ball_mph": -2.5147974, "launch_deg": 3.6396076, "spin_rpm": 1263.7618, "carry_yd": 2.0921451}}}
+ ]
+}

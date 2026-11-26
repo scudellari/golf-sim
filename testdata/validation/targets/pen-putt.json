@@ -1,0 +1,13 @@
+{
+ "format": 1,
+ "source": "PEN-PUTT",
+ "citation": "A. R. Penner (2002), \"The physics of putting\", Can. J. Phys. 80, 83-96, cup capture on a slope.",
+ "url": "https://doi.org/10.1139/p01-137",
+ "datasets": ["journal-figures"],
+ "verdict": "cite",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "PEN-PUTT.slope5deg.uphill", "kind": "cup_capture", "submodel": "cup", "use": "held-out", "inputs": {"offset_radii": 0.0, "grade_deg": 5.0, "direction": "uphill"}, "measured": {"capture_mps": 1.71}, "note": "Capture limit for a centred putt on a 5 degree slope. The earlier implementation has no slope term.", "earlier": null},
+  {"id": "PEN-PUTT.slope5deg.downhill", "kind": "cup_capture", "submodel": "cup", "use": "held-out", "inputs": {"offset_radii": 0.0, "grade_deg": 5.0, "direction": "downhill"}, "measured": {"capture_mps": 1.56}, "note": "Capture limit for a centred putt on a 5 degree slope. The earlier implementation has no slope term.", "earlier": null}
+ ]
+}

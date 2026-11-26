@@ -1,0 +1,13 @@
+{
+ "format": 1,
+ "source": "C1",
+ "citation": "Holmes (1991), centre capture speed of the cup, as quoted by Hogan and Antali (2025).",
+ "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12585879/",
+ "datasets": ["hogan-antali-2025"],
+ "verdict": "commit",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "C1.centre0.90", "kind": "cup_capture", "submodel": "cup", "use": "fit", "inputs": {"offset_radii": 0.0, "entry_mps": 1.4634, "exit_mps": 1.83}, "measured": {"holed": true}, "note": "Centre capture speed 1.626 m/s. A putt at 0.9 of it, rolling on a stimp 10 green.", "earlier": {"via": "production", "predicted": {"holed": true}, "residual": {}}},
+  {"id": "C1.centre1.15", "kind": "cup_capture", "submodel": "cup", "use": "fit", "inputs": {"offset_radii": 0.0, "entry_mps": 1.8698999999999997, "exit_mps": 1.83}, "measured": {"holed": false}, "note": "Centre capture speed 1.626 m/s. A putt at 1.15 of it, rolling on a stimp 10 green.", "earlier": {"via": "production", "predicted": {"holed": false}, "residual": {}}}
+ ]
+}

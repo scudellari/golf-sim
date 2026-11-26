@@ -1,0 +1,14 @@
+{
+ "format": 1,
+ "source": "LYU18",
+ "citation": "Lyu, Kensrud, Smith and Tosaya (2018), \"Aerodynamics of golf balls in still air\", Proceedings 2(6) 238.",
+ "url": "https://doi.org/10.3390/proceedings2060238",
+ "datasets": ["lyu-2018"],
+ "verdict": "commit",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "LYU18.cl.s0.10", "kind": "aero", "submodel": "flight", "use": "held-out", "inputs": {"spin_ratio": 0.1, "reynolds": 150000.0}, "measured": {"cl": 0.1665}, "note": "From Lyu's fit for one ball, measured above 32 m/s. Balls differ by up to 0.05 in drag here.", "earlier": {"via": "production", "predicted": {"cl": 0.17812958}, "residual": {"cl": 0.011629584}}},
+  {"id": "LYU18.cl.s0.20", "kind": "aero", "submodel": "flight", "use": "held-out", "inputs": {"spin_ratio": 0.2, "reynolds": 150000.0}, "measured": {"cl": 0.268}, "note": "From Lyu's fit for one ball, measured above 32 m/s. Balls differ by up to 0.05 in drag here.", "earlier": {"via": "production", "predicted": {"cl": 0.2466657}, "residual": {"cl": -0.021334299}}},
+  {"id": "LYU18.cl.s0.30", "kind": "aero", "submodel": "flight", "use": "held-out", "inputs": {"spin_ratio": 0.3, "reynolds": 150000.0}, "measured": {"cl": 0.3045}, "note": "From Lyu's fit for one ball, measured above 32 m/s. Balls differ by up to 0.05 in drag here.", "earlier": {"via": "production", "predicted": {"cl": 0.29840529}, "residual": {"cl": -0.0060947104}}}
+ ]
+}

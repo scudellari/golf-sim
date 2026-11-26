@@ -1,0 +1,13 @@
+{
+ "format": 1,
+ "source": "MCC",
+ "citation": "Cameron McCormick with John McPhee, \"The Short Game Explained\", Golf Digest (2014), greenside bunker club speeds.",
+ "url": "https://www.golfdigest.com/story/short-game-explained-cameron-mccormick",
+ "datasets": ["web-figures"],
+ "verdict": "cite",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "MCC.sw.moist", "kind": "delivery", "submodel": "impact", "use": "fit", "inputs": {"club": "sw", "club_mph": 63.0, "attack_deg": -8.0, "dynamic_loft_deg": 60.0, "face_deg": 6.0, "sole_height_mm": -12.0, "lie": "bunker", "sand_firmness": 0.8}, "measured": {"carry_m": 18.0}, "check": {"carry_m": {"abs": 7.0}}, "note": "Greenside splash. The club speed flies about 18 m. The sand model was tuned by hand to it.", "earlier": {"via": "production", "predicted": {"carry_m": 18.216114}, "residual": {"carry_m": 0.21611404}}},
+  {"id": "MCC.sw.dry", "kind": "delivery", "submodel": "impact", "use": "fit", "inputs": {"club": "sw", "club_mph": 68.0, "attack_deg": -8.0, "dynamic_loft_deg": 60.0, "face_deg": 6.0, "sole_height_mm": -12.0, "lie": "bunker", "sand_firmness": 0.2}, "measured": {"carry_m": 18.0}, "check": {"carry_m": {"abs": 7.0}}, "note": "Greenside splash. The club speed flies about 18 m. The sand model was tuned by hand to it.", "earlier": {"via": "production", "predicted": {"carry_m": 19.402935}, "residual": {"carry_m": 1.402935}}}
+ ]
+}

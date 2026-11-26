@@ -1,0 +1,12 @@
+{
+ "format": 1,
+ "source": "PING",
+ "citation": "Wood, Henrikson and Broadie (2018), \"The influence of face angle and club path on the resultant launch angle of a golf ball\", Proceedings 2(6) 249.",
+ "url": "https://doi.org/10.3390/proceedings2060249",
+ "datasets": ["wood-2018"],
+ "verdict": "commit",
+ "conditions": {"air_temp_c": 25.0, "pressure_pa": 101325.0, "humidity": 0.5, "wind_mph": 0.0, "ball": "standard", "lie": "driver teed 35 mm, other clubs on fairway 5 mm", "ground": {"surface": "fairway", "firmness": 0.5, "moisture": 0.3}, "green": {"stimp_ft": 10.0, "firmness": 0.5, "moisture": 0.3}},
+ "targets": [
+  {"id": "PING.lw.face-share", "kind": "delivery", "submodel": "impact", "use": "held-out", "inputs": {"club": "lw", "club_mph": 70.0, "attack_deg": -6.0, "dynamic_loft_deg": 48.0, "path_deg": 0.0, "face_deg": 2.0}, "measured": {"face_share": 0.61}, "tolerance": {"face_share": {"ci95": 0.07}}, "note": "The club speed, attack and loft are the earlier implementation's setup. The source gives none. Share of the start direction that follows the face.", "earlier": {"via": "production", "predicted": {"face_share": 0.59427403}, "residual": {"face_share": -0.015725966}}}
+ ]
+}
