@@ -41,7 +41,7 @@ jobs:
             executable_suffix: .exe
             library: golf_sim_godot.dll
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-26
@@ -73,10 +73,14 @@ jobs:
           PY
       - name: Fetch locked dependencies
         run: cargo fetch --locked
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - name: Install Zig
         if: matrix.platform == 'linux'
-        with:
-          version: '0.14.1'
+        # Zig's own release, checked against the sum ziglang.org publishes. No Zig action runs on Node.js 24.
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.14.1" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         if: matrix.platform == 'linux'
         with:
@@ -86,7 +90,7 @@ jobs:
       - name: Compute determinism digests
         # The suite has verified the committed snapshots. Regenerate them for this runner's artifact.
         run: cargo run --offline --locked -p golf-sim-testkit -- bless --all
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: digests-${{ matrix.platform }}
           path: testdata/determinism/*.json
@@ -111,7 +115,7 @@ jobs:
           mkdir -p "$binaries"
           cp "target/$TARGET/release/golf$EXE" "$binaries/golf-$PLATFORM$EXE"
           cp "target/$TARGET/release/$LIBRARY" "$binaries/${LIBRARY%.*}-$PLATFORM.${LIBRARY##*.}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binaries-${{ matrix.platform }}
           path: ${{ runner.temp }}/release-binaries
@@ -122,10 +126,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: digests-*
           path: ${{ runner.temp }}/determinism
@@ -141,7 +145,7 @@ jobs:
     concurrency:
       group: release-assets-${{ github.event.release.tag_name || github.ref_name }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: binaries-*
           merge-multiple: true
