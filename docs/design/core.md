@@ -286,6 +286,14 @@ The earlier implementation computes vectors in single precision and takes its tr
 
 **Single-precision reference data.** A value the earlier implementation passed through a vector or a packed float array was rounded to single precision, so its error grows with the size of the numbers it came from. A tolerance against such data is written in single-precision steps of the operands' magnitude: a number may differ by k × 2^-23 × s, where s is max(1, the largest magnitude among the operands and the result), never by one fixed absolute bound. The maths tests use 8 steps for a vector operation and the geometry tests 4 steps of the largest coordinate. `testdata/tolerances.toml` states the rule as `f32_steps = k` on a layer or field row, with `scale_from` naming the input paths whose magnitude enters s, and a number passes when it is within any of its row's bounds.
 
+**Rows for a fixture and for a computation.** A row may name a fixture's full key, such as `["physics/strokes"]`, and then replaces the layer row for that fixture. A field key may use `[*]` for any index, as in `events[*].time_s`. Whole strokes use such rows: rest, samples, event and touchdown positions within 0.05 m, event times within 1 ms, playback times within 10 ms (a rolling ball's stop time is ill-conditioned near the stop speed), velocities within 1 mm/s or 1e-4 relative, and spins within 0.05 rad/s or 1e-4 relative. Some values are ill-conditioned in a way that no table row can express. A unit compares such a value within the bound its computation implies, and its test lists the cases by id with the reason:
+
+- an `acos` of a dot product near 1: the angle that the dot product's rounding implies;
+- a difference of two results: the rounding of both operands;
+- a normal from a point at course scale: the point's magnitude;
+- a march with a fixed refinement: its resolution;
+- a grazing intersection: the along-ray distance within the bound divided by the sine of the grazing angle.
+
 These are starting values. A unit may tighten its layer's row when its drift report shows room. Widening a row needs a drift report that shows the difference comes from precision, posted with the change.
 
 A discrete difference comes from a threshold: a putt that dies on the lip in one implementation drops in the other. The comparison of a hole stops at the first stroke whose discrete result differs, and the test lists it. Traces of the console compare every stamp, discrete fields exactly, until such a stroke.
