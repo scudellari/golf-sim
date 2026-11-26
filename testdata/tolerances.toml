@@ -79,6 +79,42 @@ carry_m = { abs = 0.1, rel = 0.0 }
 "launch.velocity" = { abs = 1e-3, rel = 1e-4 }
 "launch.spin" = { abs = 0.01, rel = 1e-4 }
 
+# Whole-stroke bounds under the field names recorded by this fixture.
+# The facade returns single calls (a strike, a carry) under the physics row's bounds, and
+# whole strokes under the stroke field rows below.
+["physics/facade"]
+abs = 1e-6
+rel = 1e-5
+f32_steps = 8
+discrete_share = 0.005
+
+["physics/facade".fields]
+rest_position = { abs = 0.05, rel = 0.0 }
+positions = { abs = 0.05, rel = 0.0 }
+# A rolling ball's stop time is ill-conditioned near the stop speed; 10 ms is under one 60 Hz frame.
+"times[*]" = { abs = 0.01 }
+carry_m = { abs = 0.1, rel = 0.0 }
+"launch.ball_speed_mps" = { abs = 0.0, rel = 1e-4 }
+"events[*].position" = { abs = 0.05 }
+"events[*].time_s" = { abs = 1e-3 }
+"events[*].velocity" = { abs = 1e-3, rel = 1e-4 }
+# A tree or wall contact amplifies rounding in its normal; 0.05 rad/s is half an rpm.
+"events[*].spin" = { abs = 0.05, rel = 1e-4 }
+"touchdowns[*].position" = { abs = 0.05 }
+"touchdowns[*].contact_point" = { abs = 0.05 }
+"touchdowns[*].time_s" = { abs = 1e-3 }
+"touchdowns[*].velocity" = { abs = 1e-3, rel = 1e-4 }
+"touchdowns[*].depth_m" = { abs = 1e-4 }
+"launch.velocity" = { abs = 1e-3, rel = 1e-4 }
+"launch.spin" = { abs = 0.01, rel = 1e-4 }
+# A strike alone returns its launch at the top level, under the same bounds as a shot's launch.
+velocity = { abs = 1e-3, rel = 1e-4 }
+spin = { abs = 0.01, rel = 1e-4 }
+"launch.spin_rate_rad_s" = { abs = 0.01, rel = 1e-4 }
+spin_rate_rad_s = { abs = 0.01, rel = 1e-4 }
+spin_axis_rad = { abs = 1e-4 }
+"launch.spin_axis_rad" = { abs = 1e-4 }
+
 [tools]
 abs = 0.0
 rel = 0.0
