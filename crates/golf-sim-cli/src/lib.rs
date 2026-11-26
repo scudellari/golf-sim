@@ -72,6 +72,8 @@ enum Command {
     Sweep(cmd::sweep::Command),
     #[command(flatten)]
     Validate(cmd::validate::Command),
+    #[command(flatten)]
+    Score(cmd::score::Command),
 }
 
 /// Run `golf` with arguments starting with the program name.
@@ -104,6 +106,7 @@ pub fn run(args: impl IntoIterator<Item = impl Into<OsString> + Clone>) -> ExitC
         Command::Scenario(c) => cmd::scenario::run(c),
         Command::Sweep(c) => cmd::sweep::run(c),
         Command::Validate(c) => cmd::validate::run(c),
+        Command::Score(c) => cmd::score::run(c),
     };
     let outcome = logging::with_log(cli.log.as_deref(), cli.log_level, run_command);
     match outcome {

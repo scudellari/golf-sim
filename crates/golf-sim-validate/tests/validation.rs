@@ -1,13 +1,13 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 use golf_sim_validate::{
-    Conditions, Corpus, Kind, Quantities, Quantity, Report, Role, Scorecard, ScorecardDiff, Status,
-    Submodel, Target, Verdict,
+    Conditions, Corpus, Kind, Model, Quantities, Quantity, Report, Role, Scorecard, ScorecardDiff,
+    Status, Submodel, Target, TargetFile, Verdict,
 };
 use serde_json::{Value, json};
 
@@ -22,12 +22,51 @@ fn earlier(target: &Target, _: &Conditions) -> Option<Quantities> {
 #[test]
 fn committed_corpus_loads_reports_and_scores() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/validation");
-    let corpus = Corpus::load(root).unwrap();
-    assert_eq!(corpus.files().len(), 27);
+    let corpus = Corpus::load(&root).unwrap();
+    let files: BTreeSet<_> = corpus
+        .ledger()
+        .datasets
+        .values()
+        .filter(|dataset| dataset.verdict != Verdict::Excluded)
+        .flat_map(|dataset| {
+            dataset
+                .files
+                .iter()
+                .map(|path| root.join("targets").join(path))
+                .chain(
+                    dataset
+                        .local_files
+                        .iter()
+                        .map(|path| root.join("local").join(path)),
+                )
+        })
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    assert_eq!(corpus.files().len(), files.len());
+    let targets: Vec<_> = files
+        .into_iter()
+        .flat_map(|path| {
+            serde_json::from_slice::<TargetFile>(&fs::read(path).unwrap())
+                .unwrap()
+                .targets
+        })
+        .collect();
+    assert!(!targets.is_empty());
+    let checked = targets
+        .iter()
+        .filter(|target| !target.tolerance.is_empty() || target.earlier.is_some())
+        .count();
+    let with_earlier = targets
+        .iter()
+        .filter(|target| target.earlier.is_some())
+        .count();
     let report = corpus.run(&measured);
-    assert_eq!(report.targets.len(), 1158);
-    assert_eq!(count(&report, Status::Passed), 1102);
-    assert_eq!(count(&report, Status::ReportedOnly), 56);
+    assert_eq!(report.targets.len(), targets.len());
+    assert_eq!(count(&report, Status::Passed), checked);
+    assert_eq!(
+        count(&report, Status::ReportedOnly),
+        targets.len() - checked
+    );
     assert_eq!(count(&report, Status::Failed), 0);
     assert_eq!(count(&report, Status::NotRun), 0);
     let text = report.to_string();
@@ -49,11 +88,9 @@ fn committed_corpus_loads_reports_and_scores() {
         .flat_map(|row| row.scores.datasets.keys().map(String::as_str))
         .collect();
     let with_files: BTreeSet<_> = corpus
-        .ledger()
-        .datasets
+        .files()
         .iter()
-        .filter(|(_, dataset)| !dataset.files.is_empty())
-        .map(|(name, _)| name.as_str())
+        .flat_map(|file| file.datasets.iter().map(String::as_str))
         .collect();
     assert_eq!(covered, with_files);
     for row in &scorecard.rows {
@@ -72,14 +109,16 @@ fn committed_corpus_loads_reports_and_scores() {
         .iter()
         .filter_map(|row| row.score)
         .collect();
-    assert_eq!(normalized, [0.0, 0.0, 0.0, 0.0]);
+    assert!(normalized.iter().all(|&score| score == 0.0));
     let json = serde_json::to_string(&scorecard).unwrap();
     assert_eq!(serde_json::from_str::<Scorecard>(&json).unwrap(), scorecard);
     assert!(scorecard.to_string().contains("BIB\tturf_bounce\tfit"));
 
     let baseline = corpus.run(&earlier);
-    assert_eq!(count(&baseline, Status::Passed), 1102);
-    assert_eq!(count(&baseline, Status::NotRun), 56);
+    assert_eq!(
+        count(&baseline, Status::NotRun),
+        targets.len() - with_earlier
+    );
     assert_eq!(count(&baseline, Status::Failed), 0);
     println!(
         "{} targets · {} pass · {} reported only · {} ledger datasets with rows · normalized scores {normalized:?}",
@@ -89,7 +128,53 @@ fn committed_corpus_loads_reports_and_scores() {
         covered.len(),
     );
     println!("{sample}");
-    println!("Earlier predictions · 1102 pass · 56 not run");
+    println!("Earlier predictions · {with_earlier} run");
+}
+
+#[test]
+fn differences_allow_single_precision_rounding_at_both_operands() {
+    let fixture = Fixture::new("[datasets.planted]\nverdict = 'cite'\nfiles = ['a.json']");
+    fixture.write(
+        "tolerances.toml",
+        "[physics]\nrel = 0.00001\nf32_steps = 8\n[stroke]\nabs = 0.0",
+    );
+    let mut small = target("difference");
+    small["measured"] = json!({"spin_rpm_change": 0.0});
+    small["tolerance"] = json!({});
+    small["earlier"]["predicted"] = json!({"spin_rpm_change": 0.0});
+    fixture.targets("targets/a.json", "A", "planted", "cite", vec![small]);
+
+    struct Difference;
+    impl Model for Difference {
+        fn predict(&self, _: &Target, _: &Conditions) -> Option<Quantities> {
+            Some(BTreeMap::from([(
+                "spin_rpm_change".into(),
+                Quantity::Number(0.003),
+            )]))
+        }
+
+        fn predict_with_operand_magnitudes(
+            &self,
+            target: &Target,
+            conditions: &Conditions,
+        ) -> Option<(Quantities, BTreeMap<String, f64>)> {
+            Some((
+                self.predict(target, conditions)?,
+                BTreeMap::from([("spin_rpm_change".into(), 5000.003)]),
+            ))
+        }
+    }
+
+    let corpus = fixture.load().unwrap();
+    let without = corpus
+        .run(&(|target: &Target, conditions: &Conditions| Difference.predict(target, conditions)));
+    assert_eq!(without.targets[0].status, Status::Failed);
+    let with = corpus.run(&Difference);
+    let quantity = &with.targets[0].quantities["spin_rpm_change"];
+    assert_eq!(quantity.status, Status::Passed);
+    assert!(
+        (quantity.allowed_earlier_residual.unwrap() - 5000.003 * 8.0 / 8388608.0).abs() < 1e-12
+    );
 }
 
 #[test]

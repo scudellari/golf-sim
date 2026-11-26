@@ -13,6 +13,7 @@ pub mod reach;
 pub mod replay;
 pub mod scenario;
 pub mod schema;
+pub mod score;
 pub mod strategy;
 pub mod stroke;
 pub mod sweep;

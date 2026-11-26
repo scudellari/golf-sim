@@ -11,6 +11,17 @@ pub trait Model {
     /// Predict the measured quantities using the target inputs and file conditions.
     /// Return `None` when this target is outside the model's scope.
     fn predict(&self, target: &Target, conditions: &Conditions) -> Option<Quantities>;
+
+    /// Return predictions and, where needed, the sum of the magnitudes of
+    /// rounded operands in the predicted quantity's units.
+    fn predict_with_operand_magnitudes(
+        &self,
+        target: &Target,
+        conditions: &Conditions,
+    ) -> Option<(Quantities, BTreeMap<String, f64>)> {
+        self.predict(target, conditions)
+            .map(|predictions| (predictions, BTreeMap::new()))
+    }
 }
 
 impl<F: Fn(&Target, &Conditions) -> Option<Quantities>> Model for F {
@@ -68,7 +79,7 @@ impl Corpus {
                 .map(|name| (name.clone(), self.ledger().datasets[name].verdict))
                 .collect();
             for target in &file.targets {
-                let predicted = model.predict(target, &file.conditions);
+                let predicted = model.predict_with_operand_magnitudes(target, &file.conditions);
                 let quantities: BTreeMap<_, _> = target
                     .measured
                     .iter()
@@ -125,11 +136,14 @@ fn evaluate(
     target: &Target,
     name: &str,
     measured: &Quantity,
-    predictions: Option<&Quantities>,
+    predictions: Option<&(Quantities, BTreeMap<String, f64>)>,
 ) -> QuantityResult {
     let predicted = predictions
-        .and_then(|map| map.get(name))
+        .and_then(|(values, _)| values.get(name))
         .filter(|value| value.as_number().is_none_or(f64::is_finite));
+    let operands = predictions
+        .and_then(|(_, operands)| operands.get(name).copied())
+        .filter(|magnitude| magnitude.is_finite() && *magnitude >= 0.0);
     let source_tolerance = target.tolerance.get(name).copied();
     let earlier_prediction = target
         .earlier
@@ -147,7 +161,7 @@ fn evaluate(
         .zip(predicted_number)
         .map(|((earlier, measurement), prediction)| {
             (earlier - measurement).abs()
-                + layers.allowance(target.submodel, name, &target.inputs, earlier, prediction)
+                + layers.allowance(target, name, earlier, prediction, operands)
         })
         .filter(|value| value.is_finite());
     let status = if predictions.is_none() {

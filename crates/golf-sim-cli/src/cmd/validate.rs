@@ -1,6 +1,15 @@
-use clap::{Args, Subcommand};
+use std::{
+    fmt::Display,
+    fs::File,
+    io::{self, Write},
+    path::{Path, PathBuf},
+};
 
-use super::{Outcome, not_built};
+use clap::{Args, Subcommand};
+use serde::Serialize;
+
+use super::Outcome;
+use crate::validate_model;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -9,10 +18,33 @@ pub enum Command {
 }
 
 #[derive(Args)]
-pub struct ValidateArgs {}
+pub struct ValidateArgs {
+    /// Write JSON to stdout or to FILE.
+    #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "-")]
+    json: Option<PathBuf>,
+}
 
-pub fn run(command: Command) -> Outcome {
-    match command {
-        Command::Validate(_) => not_built("validate"),
+pub fn run(Command::Validate(args): Command) -> Outcome {
+    let report = validate_model::report()?;
+    print_report(&report, args.json.as_deref())?;
+    let failures = validate_model::failures(&report).count();
+    if failures != 0 {
+        return Err(format!("{failures} validation quantities failed or did not run").into());
     }
+    Ok(())
+}
+
+pub(super) fn print_report(report: &(impl Display + Serialize), json: Option<&Path>) -> Outcome {
+    let Some(path) = json else {
+        write!(io::stdout().lock(), "{report}")?;
+        return Ok(());
+    };
+    let mut output: Box<dyn Write> = if path == Path::new("-") {
+        Box::new(io::stdout().lock())
+    } else {
+        Box::new(File::create(path)?)
+    };
+    serde_json::to_writer_pretty(&mut output, report)?;
+    writeln!(output)?;
+    Ok(())
 }

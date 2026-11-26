@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Quantities, Quantity, Submodel, TargetFile, target::named_enum};
+use crate::{Quantities, Quantity, Submodel, Target, TargetFile, target::named_enum};
 
 const LEDGER: &str = "targets/LICENCES.toml";
 
@@ -369,20 +369,21 @@ impl Layers {
 
     pub(crate) fn allowance(
         &self,
-        submodel: Submodel,
+        target: &Target,
         name: &str,
-        inputs: &Quantities,
         earlier: f64,
         predicted: f64,
+        operands: Option<f64>,
     ) -> f64 {
         let (si_name, to_si) = si_units(name);
-        let bounds = self.layer(submodel).bounds(name, &si_name);
+        let bounds = self.layer(target.submodel).bounds(name, &si_name);
         let magnitude = earlier.abs().max(predicted.abs());
+        let rounded_magnitude = magnitude.max(operands.unwrap_or_default());
         let scale = bounds
             .scale_from
             .iter()
-            .filter_map(|source| input_scale(inputs, source))
-            .fold(1.0_f64.max(magnitude * to_si), f64::max);
+            .filter_map(|source| input_scale(&target.inputs, source))
+            .fold(1.0_f64.max(rounded_magnitude * to_si), f64::max);
         (bounds
             .abs
             .max(bounds.f32_steps * (1.0 / 8_388_608.0) * scale)
