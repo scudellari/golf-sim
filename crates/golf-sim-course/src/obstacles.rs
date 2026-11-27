@@ -225,8 +225,10 @@ fn ray_crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, limit: Real) -> O
         let travel = plan(direction);
         let from_tip = (height - start.y) * slope;
         let vertical = direction.y * slope;
+        let radial_squared = radial.length_squared();
+        let tip_squared = from_tip * from_tip;
         let base_contact = -start.y / direction.y;
-        if start.y >= 0.0 && start.y <= height && radial.length_squared() <= from_tip * from_tip {
+        if start.y >= 0.0 && start.y <= height && radial_squared <= tip_squared {
             return Some(0.0);
         }
         let base_entry = if (0.0..=limit).contains(&base_contact)
@@ -237,11 +239,21 @@ fn ray_crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, limit: Real) -> O
         } else {
             Real::INFINITY
         };
-        let a = travel.length_squared() - vertical * vertical;
-        let b = radial.dot(travel) + from_tip * vertical;
-        let c = radial.length_squared() - from_tip * from_tip;
-        if a == 0.0 && b == 0.0 && c == 0.0 {
-            // The whole ray lies on the extended cone. Clip it to the crown's height.
+        let travel_squared = travel.length_squared();
+        let vertical_squared = vertical * vertical;
+        let mixed = from_tip * vertical;
+        let a = travel_squared - vertical_squared;
+        let b = radial.dot(travel) + mixed;
+        let c = radial_squared - tip_squared;
+        let b_scale = (radial.x * travel.x).abs() + (radial.y * travel.y).abs() + mixed.abs();
+        // Normalization and coefficient arithmetic can leave roundoff after cancellation.
+        // Scale each residual by the magnitudes of its terms before they cancel.
+        let roundoff = 8.0 * Real::EPSILON;
+        if direction.y != 0.0
+            && a.abs() <= roundoff * (travel_squared + vertical_squared)
+            && b.abs() <= roundoff * b_scale
+            && c.abs() <= roundoff * (radial_squared + tip_squared)
+        {
             let tip_contact = (height - start.y) / direction.y;
             let entry = base_contact.min(tip_contact).max(0.0);
             let exit = base_contact.max(tip_contact).min(limit);
@@ -479,5 +491,28 @@ mod tests {
         assert!((distance - fm::sqrt(2.0)).abs() <= 1e-12);
         assert_eq!(ray_crown_entry(&tree, origin, direction, 1.0), None);
         assert_eq!(ray_crown_entry(&tree, origin, -direction, 6.0), None);
+    }
+
+    #[test]
+    fn normalized_cone_side_ray_hits_the_tip() {
+        let tree = Tree {
+            id: "synthetic".into(),
+            species_index: 0,
+            base: Vec3::ZERO,
+            height_m: 5.0,
+            trunk_radius_m: 0.05,
+            crown_base_m: 1.0,
+            crown_radius_m: 5.0,
+            density: 1.0,
+            cone: true,
+        };
+        let origin = Vec3::new(3.0, 9.0, 4.0);
+        let direction = Vec3::new(-3.0, -4.0, -4.0).normalized();
+        let distance = ray_crown_entry(&tree, origin, direction, 7.0).expect("ray hits the tip");
+        assert!((distance - fm::sqrt(41.0)).abs() <= 1e-12);
+        assert_eq!(ray_crown_entry(&tree, origin, direction, 6.0), None);
+        let below = Vec3::new(-6.0, -3.0, -8.0);
+        let distance = ray_crown_entry(&tree, below, -direction, 7.0).expect("ray hits the base");
+        assert!((distance - fm::sqrt(41.0)).abs() <= 1e-12);
     }
 }

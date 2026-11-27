@@ -1383,19 +1383,35 @@ fn crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, length: Real) -> Opti
     if within(0.0) {
         return Some(0.0);
     }
-    let a = direction.x * direction.x + direction.z * direction.z
-        - (slope * direction.y) * (slope * direction.y);
-    let half_b = start.x * direction.x
-        + start.z * direction.z
-        + slope * slope * (height - start.y) * direction.y;
-    let c = clearance(start);
+    let travel_squared = Vec2::new(direction.x, direction.z).length_squared();
+    let vertical = slope * direction.y;
+    let vertical_squared = vertical * vertical;
+    let cross_x = start.x * direction.x;
+    let cross_z = start.z * direction.z;
+    let mixed = slope * slope * (height - start.y) * direction.y;
+    let radial_squared = Vec2::new(start.x, start.z).length_squared();
+    let from_tip = slope * (height - start.y);
+    let tip_squared = from_tip * from_tip;
+    let a = travel_squared - vertical_squared;
+    let half_b = cross_x + cross_z + mixed;
+    let c = radial_squared - tip_squared;
+    // Scale cancellation error by the terms of each coefficient before summing them.
+    let roundoff = 8.0 * Real::EPSILON;
+    let base = -start.y / direction.y;
+    if direction.y != 0.0
+        && a.abs() <= roundoff * (travel_squared + vertical_squared)
+        && half_b.abs() <= roundoff * (cross_x.abs() + cross_z.abs() + mixed.abs())
+        && c.abs() <= roundoff * (radial_squared + tip_squared)
+    {
+        let tip = (height - start.y) / direction.y;
+        let entry = base.min(tip).max(0.0);
+        let exit = base.max(tip).min(length);
+        return (entry <= exit).then_some(entry);
+    }
     let discriminant = half_b * half_b - a * c;
-    let mut candidates = [Real::INFINITY; 4];
+    let mut candidates = [Real::INFINITY; 3];
     if direction.y != 0.0 {
-        candidates[0] = -start.y / direction.y;
-        if a == 0.0 && half_b == 0.0 && c == 0.0 {
-            candidates[3] = (height - start.y) / direction.y;
-        }
+        candidates[0] = base;
     }
     if a.abs() < 1e-14 {
         if half_b != 0.0 {
@@ -1556,6 +1572,29 @@ mod tests {
         assert_eq!(ground_ray_entry(|_| 0.0, 10.0, 0.0), None);
         // The global grade can be nonzero even if the ray stays over a flat patch.
         assert_eq!(ground_ray_entry(|_| 0.0, 1.0, 0.1), None);
+    }
+
+    #[test]
+    fn normalized_cone_side_ray_hits_the_tip() {
+        let tree = Tree {
+            id: "synthetic".into(),
+            species_index: 0,
+            base: Vec3::ZERO,
+            height_m: 5.0,
+            trunk_radius_m: 0.05,
+            crown_base_m: 1.0,
+            crown_radius_m: 5.0,
+            density: 1.0,
+            cone: true,
+        };
+        let origin = Vec3::new(3.0, 9.0, 4.0);
+        let direction = Vec3::new(-3.0, -4.0, -4.0).normalized();
+        let distance = crown_entry(&tree, origin, direction, 7.0).expect("ray hits the tip");
+        assert!((distance - fm::sqrt(41.0)).abs() <= 1e-12);
+        assert_eq!(crown_entry(&tree, origin, direction, 6.0), None);
+        let below = Vec3::new(-6.0, -3.0, -8.0);
+        let distance = crown_entry(&tree, below, -direction, 7.0).expect("ray hits the base");
+        assert!((distance - fm::sqrt(41.0)).abs() <= 1e-12);
     }
 
     #[test]
