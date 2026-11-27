@@ -1,5 +1,7 @@
 //! Ground samplers for a course with uniform turf conditions and for practice.
 
+use std::sync::Arc;
+
 use golf_sim_base::{Real, Surface, Vec2, Vec3};
 use golf_sim_course::{course::Course, legal::LegalMap, obstacles::ObstacleIndex, zones::ZoneMap};
 use golf_sim_physics::{
@@ -11,9 +13,9 @@ use golf_sim_physics::{
 #[derive(Debug)]
 pub struct CourseGround<'a> {
     course: &'a Course,
-    obstacles: ObstacleIndex<'a>,
-    zones: ZoneMap<'a>,
-    legal: LegalMap<'a>,
+    obstacles: Arc<ObstacleIndex<'a>>,
+    zones: Arc<ZoneMap<'a>>,
+    legal: Arc<LegalMap<'a>>,
     firmness: Real,
     moisture: Real,
     green_speed_m: Real,
@@ -23,9 +25,21 @@ impl<'a> CourseGround<'a> {
     pub fn new(course: &'a Course, firmness: Real, moisture: Real, green_speed_m: Real) -> Self {
         Self {
             course,
-            obstacles: course.obstacles(),
-            zones: course.zone_map(),
-            legal: course.legal(),
+            obstacles: Arc::new(course.obstacles()),
+            zones: Arc::new(course.zone_map()),
+            legal: Arc::new(course.legal()),
+            firmness,
+            moisture,
+            green_speed_m,
+        }
+    }
+
+    pub fn with_turf(&self, firmness: Real, moisture: Real, green_speed_m: Real) -> Self {
+        Self {
+            course: self.course,
+            obstacles: Arc::clone(&self.obstacles),
+            zones: Arc::clone(&self.zones),
+            legal: Arc::clone(&self.legal),
             firmness,
             moisture,
             green_speed_m,
