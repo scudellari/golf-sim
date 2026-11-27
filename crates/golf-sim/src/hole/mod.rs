@@ -91,9 +91,10 @@ impl Hole {
         })
     }
 
-    pub fn act(&mut self, action: Action) -> Result<Step, Refusal> {
+    pub fn act(&mut self, action: Action) -> Result<Step, prompt::ActionRefusal> {
+        self.check_action_prompt(&action)?;
         let entry = self.resolve(action)?;
-        self.apply(entry, false)
+        Ok(self.apply(entry, false)?)
     }
 
     pub fn record(&self) -> &HoleRecord {
