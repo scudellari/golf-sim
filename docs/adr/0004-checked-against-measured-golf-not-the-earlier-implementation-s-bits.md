@@ -7,6 +7,7 @@
 
 The core began as a port of a GDScript implementation. The first plan proved each unit bit for bit against that implementation, in a test-only `reference` configuration that used single-precision vectors and the platform's maths library, and then stored the default build's outputs as twins. The owner rejected that goal on 2026-11-26: "I care less about matching GDScript exactly and more about getting the simulation CORRECT to what it should be to match real physics."
 
+The earlier implementation was fitted to published data (the USGA and R&A reports, Biber's turf bounce trials, Haake, Penner), and it records its known residuals.
 
 ## Decision
 
@@ -14,7 +15,6 @@ The core began as a port of a GDScript implementation. The first plan proved eac
 - A physics unit is done when it passes its measured-data targets. A target passes when the core is within the source's tolerance, or no further from the measurement than the earlier implementation, plus the layer's tolerance.
 - The earlier implementation stays as a coarse oracle until it is retired. Each layer compares against its recorded data within a stated tolerance, which catches porting slips without demanding the same bits.
 - A model change may fix a known residual. It raises the physics version, shows the residual report before and after, and lists the oracle cases it moves.
-- Measured data lives in golf-sim with a licence ledger. Openly licensed data goes in with attribution, published averages go in as cited figures, and data with an unclear licence is fetched at calibration time. The calibration script lives here too.
 - Determinism across platforms is a separate requirement, and it still holds.
 
 ## Alternatives considered

@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+
+
 ## 0.2.1 (2026-11-27)
 
 - **`golf corpus` checks every phase 1 layer.** `golf corpus check` and `golf corpus drift` run course, physics, world and stroke fixtures through the same runners as the tests, and `--course-dir` opens the course a fixture names, so a consumer can compare its own courses' fixtures.

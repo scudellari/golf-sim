@@ -46,11 +46,7 @@ pub fn corpus() -> Result<Corpus, LoadError> {
 pub fn report() -> Result<Report, LoadError> {
     let corpus = corpus()?;
     Ok(corpus.run(&Simulation {
-        gain_baseline: corpus
-            .files()
-            .iter()
-            .flat_map(|file| &file.targets)
-            .find(|target| target.id == "X4.attack-1.5.launch"),
+        gain_baseline: corpus.carry_gain_baseline("X4"),
     }))
 }
 
@@ -618,11 +614,7 @@ fn delivery(
                 shot.carry_side_m() - carry * fm::tan(launch.readout.launch_direction_rad),
             );
             // The curvature source reports bend normalized to its published carry.
-            let source_carry = match club_id {
-                ClubId::Driver => 275.0,
-                ClubId::Iron6 => 183.0,
-                _ => return None,
-            };
+            let source_carry = conditions.curve_reference_carry(inputs.0)?;
             predictions.extend(numbers([(
                 "curve_yd",
                 curve * source_carry / carry_yd.max(1.0),
@@ -688,6 +680,9 @@ mod tests {
     fn measured_targets_pass() {
         let report = report().unwrap();
         assert!(!report.targets.is_empty());
+        for dataset in &report.skipped_datasets {
+            println!("{dataset}");
+        }
         let failures = failures(&report).collect::<Vec<_>>();
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }

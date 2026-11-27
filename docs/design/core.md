@@ -246,24 +246,25 @@ The core is checked three ways, and each answers a different question. [ADR 0004
 
 ### Validation against measured data
 
-The acceptance standard for the physics is published measurement. Each physics unit is done when its targets pass:
+The acceptance standard for the physics is published measurement. Each physics unit is done when its targets pass.
 
-| Layer | Targets |
-| --- | --- |
-| Turf bounce | Biber et al. (2023), 693 natural-turf trials, and Haake (1989) high-backspin impacts |
-| Run-out and greens | The USGA and R&A bounce-and-roll trials, stimpmeter exit speed, Penner's crater model |
-| The stroke | Stock carries per club against tour and USGA/R&A launch-condition data |
+| Layer | Public targets | Local targets |
+| --- | --- | --- |
+| Turf bounce | Biber et al. (2023), 693 natural-turf trials, Haake (1989) high-backspin impacts, and USGA and R&A landing measurements | |
+| Cup | Hogan and Antali, Penner's capture on a slope, and Bilder's flagstick trials | |
+| The stroke | Stock carry against USGA and R&A launch-condition data | |
 
 A target holds the inputs (a launch, a club delivery, an impact on turf, a run-out, a stimp reading), the measured values, the source's own tolerance where it states one, and the earlier implementation's residual. A target passes when the core is within the source's tolerance, or no further from the measurement than the earlier implementation was, plus the layer's tolerance. So the port can never make a residual worse, and a model that closes a known gap shows it.
 
-A target whose dataset the ledger marks `fetch` and whose data is not present is skipped and listed, so the suite runs offline. `golf validate` prints the residual report: for each source, club and shot type, the prediction, the measurement and the residual. `--json` writes it, so two models can be compared before and after a change. The data lives in `testdata/validation/targets/`, one file per source, with its citation.
+The suite lists and skips missing `fetch` and `local` datasets. `golf validate` prints the prediction, measurement and residual for each available target. Use `--json` to save a report for comparison. Committed targets live in `testdata/validation/targets/` and local targets live in the ignored `testdata/validation/local/`. Each file names its source.
 
 **The licence ledger.** `testdata/validation/targets/LICENCES.toml` lists every dataset with its terms and how the core uses it. A test fails when a data file has no entry.
 
 - Openly licensed data goes in whole with its attribution. Biber's supplement is CC BY 4.0.
-- A dataset whose licence is unclear is listed as `fetch`, with its URL. Its values stay out of the repository, and the calibration fetches it when it runs.
+- The ledger marks committed figures from sources such as the USGA and R&A reports as `cite`.
+- A `fetch` entry names an optional download that calibration can stage locally.
 
-**Calibration.** `calibration/fit.py` and its helpers fit the marked blocks of the tunables (`BEGIN FIT` to `END FIT` in `tunables.rs`) to the targets. `golf fit impact`, `golf fit runout` and `golf fit parity` give the script the model's outputs. `fit.py` without `--write` checks that the committed blocks still come out of the fit.
+**Calibration.** `calibration/fit.py` and its helpers fit the marked blocks of the tunables (`BEGIN FIT` to `END FIT` in `tunables.rs`) to the targets. `golf fit impact`, `golf fit runout` and `golf fit parity` give the script the model's outputs. The full run reproduces every committed block. The public run checks the two bounce blocks and names the datasets needed for the skipped fits and flight parity.
 
 ### The earlier implementation, within a tolerance
 
@@ -300,7 +301,7 @@ A discrete difference comes from a threshold: a putt that dies on the lip in one
 
 ### Improving the physics
 
-Where the earlier implementation is known to be off, the core may fix it: for example the 4- through 9-iron Stock carries that fall 5.5 to 9.9 yd short, or the lift that saturates at high spin. A model change lands this way:
+The core may correct a known residual, such as the short iron carries or the lift at high spin. Model changes follow these steps.
 
 1. Raise the physics version.
 2. Show the scorecard before and after with `golf score --against <before.json>`, where the before file comes from the parent commit. No target may fail, the rows the change is for must improve, and no row may get worse beyond its tolerance.

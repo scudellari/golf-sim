@@ -4,30 +4,38 @@ From the repository root, run `python3 -B calibration/fit.py` with Python 3.11
 or newer. The script builds `golf` offline in release mode. Set `GOLF` to a
 prebuilt executable to use that build for verification.
 
-With the `local-launches` files listed in the licence ledger under
-`testdata/validation/local/`, expect
+`testdata/validation/local/`, the script reports the maximum Python versus
+Rust flight errors and prints
 `Reproduced AERO, IMPACT, BOUNCE, GREEN BOUNCE and RUNOUT.`
-In a public checkout, expect `Skipped AERO and IMPACT. Missing dataset
-local-launches (x1.json, x2.json).` followed by
-`Reproduced BOUNCE, GREEN BOUNCE and RUNOUT.`
-Both runs check Python flight parity against Rust on the available launch rows
-and exit successfully when their checks pass.
+
+A public checkout prints these skip and reproduction lines alongside the
+Biber fit summary.
+
+```text
+Skipped RUNOUT. Missing dataset local-runout (x10.json).
+Reproduced BOUNCE and GREEN BOUNCE.
+```
+
+Both runs exit successfully when their checks pass. The local
+`local-regression` copy is reserved for fitting. The current fit
+uses the same inputs with or without that copy.
 
 To verify the public mode in a checkout with the local files, run the following
 from the repository root with no other validation jobs running:
 
 ```sh
 (
-    mkdir -p target
-    scratch=$(mktemp -d target/calibration-check.XXXXXX) || exit
-    mv testdata/validation/local "$scratch/local" || exit
-    trap 'mv "$scratch/local" testdata/validation/local && rmdir "$scratch"' EXIT
-    python3 -B calibration/fit.py
+	mkdir -p target
+	scratch=$(mktemp -d target/calibration-check.XXXXXX) || exit
+	mv testdata/validation/local "$scratch/local" || exit
+	trap 'mv "$scratch/local" testdata/validation/local && rmdir "$scratch"' EXIT
+	cargo test --workspace --offline -- --nocapture &&
+		python3 -B calibration/fit.py
 )
 ```
 
-Use `--write` to update the fitted blocks after the candidate passes the flight
-parity check. Keep local datasets in the ignored directory and out of commits.
+Use `--write` to update the fitted blocks after the candidate passes the
+available checks. Keep local datasets in the ignored directory and out of commits.
 
 The loaded green fit uses the SPIN07, slipping Haake and R04 sand-wedge training
 rows. SPIN07 and Ganton have no TruFirm readings, so the fit uses nominal

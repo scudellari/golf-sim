@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Quantities, Quantity, Submodel, Target, TargetFile, target::named_enum};
+use crate::{Kind, Quantities, Quantity, Submodel, Target, TargetFile, target::named_enum};
 
 const LEDGER: &str = "targets/LICENCES.toml";
 
@@ -35,6 +35,8 @@ pub struct Ledger {
 pub struct Dataset {
     pub verdict: Verdict,
     #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
     pub files: Vec<PathBuf>,
     #[serde(default)]
     pub local_files: Vec<PathBuf>,
@@ -52,6 +54,17 @@ pub struct SkippedDataset {
     pub dataset: String,
     pub verdict: Verdict,
     pub missing_files: Vec<String>,
+}
+
+impl fmt::Display for SkippedDataset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "skipped\t{}\t{}\t", self.dataset, self.verdict)?;
+        if self.missing_files.is_empty() {
+            f.write_str("no local data")
+        } else {
+            f.write_str(&self.missing_files.join(", "))
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -137,7 +150,10 @@ impl Corpus {
                     }
                 }
             }
-            if has_present_files && dataset.verdict != Verdict::Excluded {
+            let local_without_targets =
+                dataset.verdict == Verdict::Local && dataset.sources.is_empty();
+            if has_present_files && dataset.verdict != Verdict::Excluded && !local_without_targets
+            {
                 needs_rows.insert(name.as_str());
             }
             if dataset.verdict.optional() && (!has_present_files || !missing_files.is_empty()) {
@@ -208,6 +224,20 @@ impl Corpus {
 
     pub fn files(&self) -> &[TargetFile] {
         &self.files
+    }
+
+    /// Find the launch that the source uses as the baseline for carry gains.
+    pub fn carry_gain_baseline(&self, source: &str) -> Option<&Target> {
+        let mut baselines = self
+            .files()
+            .iter()
+            .filter(|file| file.source == source)
+            .flat_map(|file| &file.targets)
+            .filter(|target| {
+                target.kind == Kind::Launch && !target.measured.contains_key("carry_gain_yd")
+            });
+        let baseline = baselines.next()?;
+        baselines.next().is_none().then_some(baseline)
     }
 
     pub fn skipped_datasets(&self) -> &[SkippedDataset] {

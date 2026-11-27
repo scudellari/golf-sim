@@ -100,7 +100,6 @@ fn measured_stock_carry() {
     report
         .targets
         .retain(|target| target.kind == Kind::StockCarry);
-    report.skipped_datasets.clear();
     print!("{}", report.scorecard());
     assert_eq!(report.targets.len(), 1);
     for target in &report.targets {

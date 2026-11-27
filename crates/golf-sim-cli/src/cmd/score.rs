@@ -26,6 +26,9 @@ pub fn run(Command::Score(args): Command) -> Outcome {
     let after = validate_model::report()?.scorecard();
     if let Some(path) = args.against {
         let before = serde_json::from_slice(&fs::read(path)?)?;
+        for dataset in &after.skipped_datasets {
+            eprintln!("{dataset}");
+        }
         print_report(&Scorecard::diff(&before, &after), args.json.as_deref())
     } else {
         print_report(&after, args.json.as_deref())

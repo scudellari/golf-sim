@@ -2,7 +2,7 @@
 
 Run with Python 3.11 or later. GOLF can name a prebuilt golf executable.
 The default checks the committed blocks using the available datasets.
---write applies the fit after checking flight parity with a scratch build.
+--write checks available flight launches with a scratch build before applying the fit.
 """
 import argparse
 import difflib
@@ -20,7 +20,8 @@ from greenfit import fit as fit_green
 from targets import ROOT, Targets
 
 TUNABLES = Path("crates/golf-sim-physics/src/tunables.rs")
-LAUNCH_DATASET = "local-launches"
+LOCAL_LAUNCHES = "local-launches"
+RUNOUT = "local-runout"
 CARGO = ("cargo", "run", "--offline", "--release", "-p", "golf-sim-cli", "--")
 CLUBS = dict(zip(
     ("driver", "3wood", "hybrid", "4iron", "5iron", "6iron", "7iron", "8iron", "9iron", "pw"),
@@ -94,11 +95,29 @@ def checked_aero(text):
     return [float(values[name]) for name in COEFFICIENTS]
 
 
-def check_parity(lines, targets, coefficients):
+def can_fit(targets, name, dataset, *files):
+    missing = [file for file in targets.missing_local_files(dataset) if file in files]
+    if missing:
+        print(f"Skipped {name}. Missing dataset {dataset} ({', '.join(missing)}).", flush=True)
+    return not missing
+
+
+def runout_block(command, targets, root, text):
+    [stimp] = records(invoke(command, targets, root, "runout"), "RUNOUT ")
+    return replace_block(text, "RUNOUT", format_constants({"FAIRWAY_STIMP_M": stimp}))
+
+
+def check_parity(command, targets, root, text):
+    launch_files = ("x1.json", "x2.json", "x4.json", "x9.json")
+    missing = targets.missing_local_files(LOCAL_LAUNCHES)
+    if all(file in missing for file in launch_files):
+        can_fit(targets, "flight parity", LOCAL_LAUNCHES, *launch_files)
+        return
     rows = targets.rows(("X1", "X2", "X4", "X9"), "launch")
-    actual = records(lines, "FLIGHT ")
+    actual = records(invoke(command, targets, root, "parity"), "FLIGHT ")
     if not rows or len(actual) != len(rows):
         raise ValueError(f"Rust returned {len(actual)} flight rows, expected {len(rows)}")
+    coefficients = checked_aero(text)
     maxima = [0.0] * 4
     for row, measured in zip(rows, actual, strict=True):
         predicted = fly(*launch(row), coefficients)
@@ -126,23 +145,29 @@ def main():
     with tempfile.TemporaryDirectory(prefix="golf-calibration-") as directory:
         scratch = Path(directory)
         targets = Targets(scratch)
-        missing = targets.missing_local_files(LAUNCH_DATASET)
         candidate = original
-        if missing:
-            print(f"Skipped AERO and IMPACT. Missing dataset {LAUNCH_DATASET} "
-                  f"({', '.join(missing)}).", flush=True)
-        else:
+        reproduced = []
+        has_impact = can_fit(targets, "IMPACT", LOCAL_LAUNCHES, "x1.json")
+        if has_impact:
             impact = impact_block(original, invoke(command, targets, ROOT, "impact"))
             candidate = replace_block(candidate, "IMPACT", impact)
+        if can_fit(targets, "AERO", LOCAL_LAUNCHES, "x1.json", "x2.json", "x4.json"):
             candidate = replace_block(candidate, "AERO", format_constants(fit_flight(targets)))
+            reproduced.append("AERO")
+        if has_impact:
+            reproduced.append("IMPACT")
         bounce = fit_bounce(targets)
         candidate = replace_block(candidate, "BOUNCE", format_constants(bounce))
         candidate = replace_block(candidate, "GREEN BOUNCE", format_constants(fit_green(
             targets, bounce["BOUNCE_GREEN_TANGENTIAL_COR"],
         )))
+        reproduced.extend(("BOUNCE", "GREEN BOUNCE"))
 
-        [stimp] = records(invoke(command, targets, ROOT, "runout"), "RUNOUT ")
-        generated = replace_block(candidate, "RUNOUT", format_constants({"FAIRWAY_STIMP_M": stimp}))
+        has_runout = can_fit(targets, "RUNOUT", RUNOUT, "x10.json")
+        generated = candidate
+        if has_runout:
+            generated = runout_block(command, targets, ROOT, candidate)
+            reproduced.append("RUNOUT")
         if generated != original and not args.write:
             show_diff(original, generated)
             return 1
@@ -154,18 +179,15 @@ def main():
             shutil.copytree(ROOT, staged, ignore=shutil.ignore_patterns(".git", "target", "local"))
             staged_tunables = staged / TUNABLES
             staged_tunables.write_text(candidate, encoding="utf-8")
-            [stimp] = records(invoke(CARGO, targets, staged, "runout"), "RUNOUT ")
-            generated = replace_block(candidate, "RUNOUT", format_constants({"FAIRWAY_STIMP_M": stimp}))
-            check_parity(invoke(CARGO, targets, staged, "parity"), targets, checked_aero(generated))
+            if has_runout:
+                generated = runout_block(CARGO, targets, staged, candidate)
+            check_parity(CARGO, targets, staged, generated)
             show_diff(original, generated)
             tunables.write_text(generated, encoding="utf-8")
             print("Calibration blocks updated.")
         else:
-            check_parity(invoke(command, targets, ROOT, "parity"), targets, checked_aero(original))
-            reproduced = "BOUNCE, GREEN BOUNCE and RUNOUT"
-            if not missing:
-                reproduced = "AERO, IMPACT, " + reproduced
-            print(f"Reproduced {reproduced}.")
+            check_parity(command, targets, ROOT, original)
+            print(f"Reproduced {', '.join(reproduced[:-1])} and {reproduced[-1]}.")
     return 0
 
 

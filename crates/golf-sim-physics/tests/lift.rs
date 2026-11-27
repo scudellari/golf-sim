@@ -106,22 +106,6 @@ fn cup_capture_matches_parent_bits() {
 
 #[test]
 fn current_coefficients_stay_within_lyu_regional_ranges() {
-    // C68 scored these fits with both wedge launches held out. The permitted
-    // absolute carry errors were 3.132 yd (short) and 1.066 yd (long).
-    // Form                               Loss   Short    Long  Failed checks
-    // Parent                            21.111  -3.132  -1.065   0
-    // Capped power                      13.633  -4.015  -1.708  49
-    // Patent                            18.404  -0.962  +3.192  62
-    // Power bend, fixed drag crisis     14.958  -3.929  -0.499  46
-    // Power bend, refit drag crisis     15.150  -2.972  +0.167  40
-    // Parent lift bend, refit crisis    15.317  -4.118  -0.787  51
-    // Power bend, patent drag           19.802  -0.648  +2.857  64
-    // Patent lift bend, drag crisis     10.183  -3.751  -0.723  56
-    // Patent lift bend, patent drag     17.437  -1.067  +3.425  63
-    // The power bend with a refit drag crisis met the wedge launches and sampled Lyu
-    // bounds. One carry gain error grew from 0.900 to 2.033 yd.
-    // Patent drag exceeded the sampled Cd bounds by 0.170 to 0.218.
-    //
     // Lyu et al. (2018), doi:10.3390/proceedings2060238, Figures 3a and 4a
     // (CC BY 4.0).
     // Figure 3a shows ball-to-ball extrema at sampled Reynolds numbers.

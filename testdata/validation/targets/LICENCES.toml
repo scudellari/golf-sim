@@ -1,7 +1,7 @@
 # The licence ledger of the validation targets. Every data file in this folder is listed under the
 # dataset whose terms cover it. Verdicts: commit (openly licensed, committed with attribution), cite
 # (individual measured values with their source), fetch (downloaded when a fit runs, never committed),
-# local (kept out of this repository until the owner decides; the suite skips it when absent),
+# local (kept in the ignored local directory, skipped when absent),
 # excluded (not used). The licences are a reading of each source's terms, not legal advice.
 
 format = 1
@@ -64,7 +64,7 @@ licence_url = "https://creativecommons.org/licenses/by/4.0/"
 checked = "https://api.crossref.org/works/10.3390/proceedings2060249"
 terms = "Crossref records CC BY 4.0 for the version of record. The publisher's page refused automated fetches."
 attribution = "Face-angle shares from Wood, Henrikson and Broadie, Proceedings 2(6) 249 (2018), https://doi.org/10.3390/proceedings2060249, CC BY 4.0."
-changes = "Three means and confidence intervals taken from the text."
+changes = "The lob-wedge mean and confidence interval are taken from the text."
 use = "Start direction, held out."
 files = ["ping.json"]
 checked_on = "2026-11-26"
@@ -133,7 +133,7 @@ licence = "none found"
 checked = "https://www.randa.org/terms-and-conditions"
 terms = "The documents carry no licence line. The R&A site terms: \"You may use the Content only for your personal, non-commercial use, and provided that you acknowledge the copyright owner.\" The USGA terms page refused the fetch."
 notes = "The spin report is read from the Japan Golf Association's copy, which carries no licence line either. R04's site means and the spin report's spreads are read from the vector points of their figures."
-use = "Robot face map deltas, fairway run means and spreads, one launch-condition row, the spin report's green landing fits, and R04's landing means by site and turf stiffness."
+use = "Robot face map deltas, one launch-condition row, the spin report's green landing fits, and R04's landing means by site and turf stiffness."
 files = ["r47.json", "r22.json", "spin07.json", "r04.json"]
 checked_on = "2026-11-26"
 

@@ -98,7 +98,7 @@ def fit(targets):
     tour = [row for row in targets.rows(("X1", "X2"), "launch")
             if set(TOUR_METRICS).intersection(fit_measurements(row))]
     gain_rows = targets.rows(("X4",), "launch")
-    baseline = next(row for row in gain_rows if row["id"] == "X4.attack-1.5.launch")
+    [baseline] = [row for row in gain_rows if "carry_gain_yd" not in row["measured"]]
     gains = [row for row in gain_rows if "carry_gain_yd" in fit_measurements(row)]
     if not tour or not gains or not fit_measurements(baseline):
         raise ValueError("Flight fit requires launch rows and carry gains")

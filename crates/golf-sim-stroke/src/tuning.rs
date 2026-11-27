@@ -47,7 +47,7 @@ pub fn club(id: ClubId) -> ClubTuning {
             lie_deg: 58.0,
         },
         ClubId::Wood3 => ClubTuning {
-            speed_mph: 107.0 * 105.0 / 113.0,
+            speed_mph: 99.42477876106194,
             attack_deg: -1.0,
             loft_delta_deg: -1.0,
             plane_deg: 52.0,

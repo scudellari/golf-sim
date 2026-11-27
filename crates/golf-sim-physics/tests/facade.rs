@@ -148,7 +148,7 @@ fn covered(target: &Target, name: &str) -> bool {
 struct FacadeModel;
 
 impl Model for FacadeModel {
-    fn predict(&self, target: &Target, _: &Conditions) -> Option<Quantities> {
+    fn predict(&self, target: &Target, conditions: &Conditions) -> Option<Quantities> {
         if !target.measured.keys().any(|name| covered(target, name)) {
             return None;
         }
@@ -205,11 +205,7 @@ impl Model for FacadeModel {
             let curve_yd = units::to_yards(stroke.carry_side_m() - carry_m * fm::tan(direction));
             let curve_yd = if target.id.starts_with("X3.") {
                 // The source expresses the bend at its published carry.
-                let source_carry_yd = match club {
-                    ClubId::Driver => 275.0,
-                    ClubId::Iron6 => 183.0,
-                    _ => panic!("no published carry for {club}"),
-                };
+                let source_carry_yd = conditions.curve_reference_carry(target)?;
                 curve_yd * source_carry_yd / carry_yd.max(1.0)
             } else {
                 curve_yd
@@ -244,9 +240,6 @@ fn measured_facade_targets() {
     report
         .targets
         .retain(|result| !result.quantities.is_empty());
-    report
-        .skipped_datasets
-        .retain(|entry| entry.dataset.contains("tiers"));
     print!("{}", report.scorecard());
     let mut failed = Vec::new();
     for target in &report.targets {

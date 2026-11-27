@@ -45,6 +45,31 @@ pub fn run(Command::Fit(args): Command) -> Outcome {
         Some(path) => Corpus::load(path)?,
         None => model::corpus()?,
     };
+    let (dataset, required_files): (_, &[_]) = match args.job {
+        Job::Impact => ("local-launches", &["local/x1.json"]),
+        Job::Runout => ("local-runout", &["local/x10.json"]),
+        Job::Parity => (
+            "local-launches",
+            &[
+                "local/x1.json",
+                "local/x2.json",
+                "local/x4.json",
+                "local/x9.json",
+            ],
+        ),
+    };
+    if let Some(skipped) = corpus.skipped_datasets().iter().find(|entry| {
+        entry.dataset == dataset
+            && entry
+                .missing_files
+                .iter()
+                .any(|path| required_files.contains(&path.as_str()))
+    }) {
+        eprintln!("{skipped}");
+        if !matches!(args.job, Job::Parity) {
+            return Ok(());
+        }
+    }
     match args.job {
         Job::Impact => fit_impact(&corpus),
         Job::Runout => fit_runout(&corpus),

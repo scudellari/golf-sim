@@ -31,6 +31,14 @@ cargo test --workspace --offline
 
 When `Cargo.lock` changes, run `just vendor` again.
 
+### Run validation with local data
+
+`cargo test --workspace --offline` runs the available targets and lists
+missing local datasets in the test output. Use `-- --nocapture` to see those
+lines on a passing run. For local tour-data checks and the full fit, place the
+files listed in the licence ledger under `testdata/validation/local/`.
+Keep that directory out of commits. See the [calibration guide](calibration/README.md).
+
 ## The determinism rules
 
 | Rule | What to do | Check |

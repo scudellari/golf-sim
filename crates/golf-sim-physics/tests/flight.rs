@@ -108,7 +108,7 @@ fn carry(landing: FlightPoint) -> Real {
 }
 
 struct FlightModel<'a> {
-    gain_baseline: &'a Target,
+    gain_baseline: Option<&'a Target>,
 }
 
 impl Model for FlightModel<'_> {
@@ -159,7 +159,7 @@ impl Model for FlightModel<'_> {
         ]);
         if target.measured.contains_key("carry_gain_yd") {
             let baseline = fly(
-                launch_readout(self.gain_baseline),
+                launch_readout(self.gain_baseline.expect("carry-gain baseline launch")),
                 &sample,
                 &mut NoProbe,
             )
@@ -184,12 +184,7 @@ impl Model for FlightModel<'_> {
 #[test]
 fn meets_measured_flight_targets() {
     let corpus = Corpus::load(testdata().join("validation")).unwrap();
-    let gain_baseline = corpus
-        .files()
-        .iter()
-        .flat_map(|file| &file.targets)
-        .find(|target| target.id == "X4.attack-1.5.launch")
-        .expect("carry-gain baseline launch");
+    let gain_baseline = corpus.carry_gain_baseline("X4");
     let mut report = corpus.run(&FlightModel { gain_baseline });
     report
         .targets
@@ -246,9 +241,9 @@ fn point_bits(point: FlightPoint) -> [u64; 10] {
 #[test]
 fn traced_flight_records_phases_without_changing_the_result() {
     let launch = LaunchReadout {
-        ball_speed_mps: units::mph(171.0),
-        launch_angle_rad: deg_to_rad(10.4),
-        spin_rate_rad_s: units::rpm(2545.0),
+        ball_speed_mps: 70.0,
+        launch_angle_rad: deg_to_rad(12.0),
+        spin_rate_rad_s: 300.0,
         ..LaunchReadout::default()
     };
     let air = AirSample::default();

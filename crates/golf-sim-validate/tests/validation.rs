@@ -61,6 +61,9 @@ fn committed_corpus_loads_reports_and_scores() {
         .filter(|target| target.earlier.is_some())
         .count();
     let report = corpus.run(&measured);
+    for dataset in &report.skipped_datasets {
+        println!("{dataset}");
+    }
     assert_eq!(report.targets.len(), targets.len());
     assert_eq!(count(&report, Status::Passed), checked);
     assert_eq!(
@@ -69,12 +72,21 @@ fn committed_corpus_loads_reports_and_scores() {
     );
     assert_eq!(count(&report, Status::Failed), 0);
     assert_eq!(count(&report, Status::NotRun), 0);
+    let sample_club = if report
+        .skipped_datasets
+        .iter()
+        .any(|dataset| dataset.dataset == "local-deliveries")
+    {
+        "lw"
+    } else {
+        "driver"
+    };
+    let sample_prefix =
+        format!("PING\t{sample_club}\tdelivery\tPING.{sample_club}.face-share\tface_share\t");
     let text = report.to_string();
     let sample = text
         .lines()
-        .find(|line| {
-            line.starts_with("PING\tdriver\tdelivery\tPING.driver.face-share\tface_share\t")
-        })
+        .find(|line| line.starts_with(&sample_prefix))
         .unwrap();
     assert!(sample.ends_with("\t0\tpass"), "{sample}");
     let json = serde_json::to_string(&report).unwrap();
@@ -189,11 +201,55 @@ fn unlisted_nested_data_fails_the_ledger_check() {
 
 #[test]
 fn a_dataset_with_data_but_no_targets_fails_the_ledger_check() {
-    let fixture = Fixture::new("[datasets.planted]\nverdict = 'cite'\nfiles = ['raw.csv']");
-    fixture.write("validation/targets/raw.csv", "data");
-    let error = fixture.load().unwrap_err().to_string();
-    assert!(error.contains("datasets with files give no scorecard row: {\"planted\"}"));
-    println!("{error}");
+    for (verdict, sources, directory, files) in [
+        ("commit", "[]", "targets", "files"),
+        ("cite", "[]", "targets", "files"),
+        ("fetch", "[]", "targets", "files"),
+        ("local", "['P']", "local", "local_files"),
+    ] {
+        let fixture = Fixture::new(&format!(
+            "[datasets.planted]\nverdict = '{verdict}'\nsources = {sources}\n{files} = ['raw.csv']"
+        ));
+        fixture.write(&format!("validation/{directory}/raw.csv"), "data");
+        let error = fixture.load().unwrap_err().to_string();
+        assert!(
+            error.contains("datasets with files give no scorecard row: {\"planted\"}"),
+            "{verdict}: {error}"
+        );
+    }
+}
+
+#[test]
+fn local_fit_inputs_without_sources_need_no_scorecard_row() {
+    let fixture = Fixture::new(
+        "
+[datasets.planted]
+verdict = 'cite'
+sources = ['A']
+files = ['a.json']
+[datasets.fit-inputs]
+verdict = 'local'
+sources = []
+local_files = ['raw/data.csv', 'raw/SOURCE.txt']
+",
+    );
+    fixture.targets(
+        "targets/a.json",
+        "A",
+        "planted",
+        "cite",
+        vec![target("A.first")],
+    );
+    let without = fixture.load().unwrap().run(&measured).scorecard();
+    assert_eq!(without.skipped_datasets.len(), 1);
+    assert_eq!(without.skipped_datasets[0].dataset, "fit-inputs");
+
+    fixture.write("validation/local/raw/data.csv", "data");
+    fixture.write("validation/local/raw/SOURCE.txt", "provenance");
+    let with = fixture.load().unwrap().run(&measured).scorecard();
+    assert!(with.skipped_datasets.is_empty());
+    assert_eq!(with.rows, without.rows);
+    assert_eq!(with.submodels, without.submodels);
 }
 
 #[test]

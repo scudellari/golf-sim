@@ -201,13 +201,7 @@ pub(crate) fn display_skipped(
     skipped: &[SkippedDataset],
 ) -> fmt::Result {
     for entry in skipped {
-        let missing = entry.missing_files.join(", ");
-        let detail = if missing.is_empty() {
-            "no local data"
-        } else {
-            &missing
-        };
-        writeln!(f, "skipped\t{}\t{}\t{detail}", entry.dataset, entry.verdict)?;
+        writeln!(f, "{entry}")?;
     }
     Ok(())
 }

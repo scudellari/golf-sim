@@ -44,6 +44,16 @@ pub struct Conditions {
     pub lie: String,
     pub ground: Ground,
     pub green: Green,
+    #[serde(default)]
+    pub curve_reference_carry_yd: BTreeMap<String, f64>,
+}
+
+impl Conditions {
+    /// The carry at which the source measures a club's lateral bend.
+    pub fn curve_reference_carry(&self, target: &Target) -> Option<f64> {
+        let club = target.inputs.get("club")?.as_str()?;
+        self.curve_reference_carry_yd.get(club).copied()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

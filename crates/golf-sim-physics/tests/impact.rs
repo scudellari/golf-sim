@@ -282,11 +282,7 @@ impl Model for ImpactModel {
             quantities.insert("carry_yd".into(), Quantity::Number(carry_yd));
             if target.measured.contains_key("curve_yd") {
                 // The source normalizes the lateral bend to each club's published carry.
-                let source_carry_yd = match setup.club {
-                    ClubId::Driver => 275.0,
-                    ClubId::Iron6 => 183.0,
-                    club => panic!("no published carry for {club}"),
-                };
+                let source_carry_yd = conditions.curve_reference_carry(target)?;
                 let curve = landing.x - carry * fm::tan(launch.readout.launch_direction_rad);
                 quantities.insert(
                     "curve_yd".into(),
