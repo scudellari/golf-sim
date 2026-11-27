@@ -20,11 +20,15 @@ use golf_sim_physics::{
 use golf_sim_stroke::{
     address::{Address, Assists, Intent, Preset, Setting},
     bag::{self, Group},
-    delivery::{self, BuiltDelivery, DeliveryExecution, DeliveryInput},
+    delivery::{self, BuiltDelivery, DeliveryInput},
     tuning,
     wrappers::{self, FlightAir, MownGround, StrikeQuality},
 };
-use golf_sim_swing::spec::StrikeMode;
+use golf_sim_swing::{
+    execution::Execution,
+    hands::{Swing, exact},
+    spec::{StrikeMode, SwingSpec},
+};
 use golf_sim_testkit::tolerance;
 
 fn fixture() -> PathBuf {
@@ -65,7 +69,7 @@ fn surface(record: &Dict, name: &str) -> Surface {
     Surface::ALL[usize::try_from(integer(record, name)).unwrap()]
 }
 
-fn read_case(case: &Dict) -> (DeliveryInput, DeliveryExecution, bool) {
+fn read_case(case: &Dict) -> (DeliveryInput, Execution, bool) {
     assert_eq!(field(case, "call").as_str(), Some("delivery_builder.build"));
 
     let args = dict(case, "input");
@@ -110,11 +114,15 @@ fn read_case(case: &Dict) -> (DeliveryInput, DeliveryExecution, bool) {
         panic!("expected strike on the face");
     };
     let [toe, up] = strike.values;
-    let execution = DeliveryExecution {
+    let execution = Execution {
         power: number(execution, "power"),
         timing_fault: number(execution, "timing_fault"),
         timed_out: boolean(execution, "timed_out"),
         strike_m: boolean(execution, "has_strike").then_some(Vec2::new(toe, up)),
+        timing_error_s: 0.0,
+        impact_usec: 0,
+        backswing_s: 0.0,
+        ring_s: 0.0,
     };
     (input, execution, boolean(args, "with_noise"))
 }
@@ -396,7 +404,15 @@ fn strike_reading_distinguishes_splash_and_fat_contact() {
         interference: 0.4,
         ..Launch::default()
     };
-    let execution = DeliveryExecution::default();
+    let execution = exact(
+        &SwingSpec::default(),
+        Swing::Exact {
+            power: 0.0,
+            timing_fault: 0.0,
+            strike_m: None,
+        },
+        0,
+    );
     assert!(!wrappers::fat(&request, &launch, &air, &ground));
     assert_eq!(
         wrappers::quality(ClubId::SandWedge, execution, &launch, false),

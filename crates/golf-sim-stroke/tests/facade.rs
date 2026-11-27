@@ -25,11 +25,14 @@ use golf_sim_physics::{
 };
 use golf_sim_stroke::{
     address::{Address, Assists},
-    delivery::{DeliveryExecution, DeliveryInput},
+    delivery::DeliveryInput,
     results::{DropResult, Preview, StrokeResult},
     stroke::{self, StrokeInput},
 };
-use golf_sim_swing::spec::{StrikeMode, SwingSpec};
+use golf_sim_swing::{
+    execution::Execution,
+    spec::{StrikeMode, SwingSpec},
+};
 use golf_sim_testkit::tolerance;
 use golf_sim_validate::{Conditions, Corpus, Kind, Model, Quantities, Quantity, Status, Target};
 
@@ -363,12 +366,16 @@ fn stroke_input(input: &Dict) -> StrokeInput {
     }
 }
 
-fn execution(input: &Dict) -> DeliveryExecution {
-    DeliveryExecution {
+fn execution(input: &Dict) -> Execution {
+    Execution {
         power: number(input, "power"),
         timing_fault: number(input, "timing_fault"),
         timed_out: boolean(field(input, "timed_out")),
         strike_m: boolean(field(input, "has_strike")).then(|| vector2(field(input, "strike_m"))),
+        timing_error_s: 0.0,
+        impact_usec: 0,
+        backswing_s: 0.0,
+        ring_s: 0.0,
     }
 }
 

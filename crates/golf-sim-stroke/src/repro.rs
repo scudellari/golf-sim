@@ -15,10 +15,11 @@ use golf_sim_physics::{
     samplers::AirSample,
     values::{Launch, ShotEvent, ShotResult, Touchdown},
 };
+use golf_sim_swing::execution::Execution;
 
 use crate::{
     address::{Address, Setting},
-    delivery::{DeliveryExecution, DeliveryInput},
+    delivery::DeliveryInput,
     results::{StrokeOutcome, StrokeResult},
     stroke::{self, StrokeInput},
 };
@@ -202,7 +203,7 @@ impl StrokeSeeds {
 #[derive(Debug)]
 pub struct StrokeRepro {
     pub setup: StrokeSetup,
-    pub execution: DeliveryExecution,
+    pub execution: Execution,
     pub gust_time_s: Real,
     pub flagstick_in: bool,
     versions: Variant,
@@ -213,7 +214,7 @@ impl StrokeRepro {
     pub fn capture(
         setup: StrokeSetup,
         input: &StrokeInput,
-        execution: DeliveryExecution,
+        execution: Execution,
         result: &StrokeResult,
     ) -> Result<Self, Error> {
         let engine = BundleEngine::current();
@@ -293,11 +294,16 @@ impl StrokeRepro {
         };
         Ok(Self {
             setup: StrokeSetup::read(record.object("setup")?)?,
-            execution: DeliveryExecution {
+            execution: Execution {
                 power: execution.real("power")?,
                 timing_fault: execution.real("timing_fault")?,
                 timed_out: execution.boolean("timed_out")?,
                 strike_m,
+                // Format 1 stores only the fields delivery uses.
+                timing_error_s: 0.0,
+                impact_usec: 0,
+                backswing_s: 0.0,
+                ring_s: 0.0,
             },
             gust_time_s: record.real("gust_time_s")?,
             flagstick_in: record.boolean("flagstick_in")?,

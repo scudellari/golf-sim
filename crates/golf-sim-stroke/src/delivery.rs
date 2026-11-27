@@ -1,7 +1,7 @@
 //! Build club delivery from a resolved address, lie, and swing.
 
 use golf_sim_base::{
-    ClubId, Real, Seed, Surface, Vec2, fm,
+    ClubId, Real, Seed, Surface, fm,
     num::{clampf, deg_to_rad, lerpf},
     seed::SeedStream,
     trace::{Phase, Probe, Source},
@@ -11,6 +11,7 @@ use golf_sim_physics::{
     facade::{sole_height_for_strike, standard_ball, standard_club},
     values::{ClubSpec, Delivery, Lie},
 };
+use golf_sim_swing::execution::Execution;
 
 use crate::{address::Address, tuning as t};
 
@@ -20,15 +21,6 @@ pub struct DeliveryInput {
     pub address: Address,
     pub lie: AddressLie,
     pub attempt_seed: Seed,
-}
-
-/// The judged swing values that affect delivery. Strike axes are toe and up, in metres.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct DeliveryExecution {
-    pub power: Real,
-    pub timing_fault: Real,
-    pub timed_out: bool,
-    pub strike_m: Option<Vec2>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,7 +84,7 @@ pub fn fault_curve(timing_fault: Real) -> Real {
 /// Previews disable hidden noise and spread. A timeout still resolves as a seeded mishit.
 pub fn build<P: Probe>(
     input: &DeliveryInput,
-    execution: DeliveryExecution,
+    execution: Execution,
     with_noise: bool,
     probe: &mut P,
 ) -> BuiltDelivery {

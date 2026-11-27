@@ -8,8 +8,9 @@ use golf_sim_physics::{
     samplers::{AirSample, AirSampler, GroundSample, GroundSampler},
     values::{Contact, Launch, ShotRequest},
 };
+use golf_sim_swing::execution::Execution;
 
-use crate::{delivery::DeliveryExecution, tuning as t};
+use crate::tuning as t;
 
 /// A ground sampler for remeasuring contact with only the soil and sand.
 pub struct MownGround<'a>(pub &'a dyn GroundSampler);
@@ -87,12 +88,7 @@ pub enum StrikeQuality {
     Mishit,
 }
 
-pub fn quality(
-    club: ClubId,
-    execution: DeliveryExecution,
-    launch: &Launch,
-    fat: bool,
-) -> StrikeQuality {
+pub fn quality(club: ClubId, execution: Execution, launch: &Launch, fat: bool) -> StrikeQuality {
     let best_up = t::club(club).strike_up_mm / 1000.0;
     let miss = Vec2::new(launch.strike_toe_m, launch.strike_up_m - best_up).length();
     if execution.timed_out

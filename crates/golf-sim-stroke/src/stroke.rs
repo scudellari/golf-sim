@@ -13,11 +13,15 @@ use golf_sim_physics::{
     samplers::{AirSampler, GroundSample, GroundSampler},
     values::{EndReason, Launch, ShotRequest, ShotResult},
 };
-use golf_sim_swing::spec::SwingSpec;
+use golf_sim_swing::{
+    execution::Execution,
+    hands::{Swing, exact},
+    spec::SwingSpec,
+};
 
 use crate::{
     address::{Address, Assists, Intent, Setting},
-    delivery::{self, DeliveryExecution, DeliveryInput},
+    delivery::{self, DeliveryInput},
     results::{Aloft, DropResult, Preview, StrokeOutcome, StrokeResult},
     tuning as t,
     wrappers::{self, FlightAir},
@@ -157,7 +161,7 @@ pub fn place(spot: Vec3, world: &World<'_>, seed: Seed, probe: &mut impl Probe) 
 
 pub fn play(
     input: &StrokeInput,
-    execution: DeliveryExecution,
+    execution: Execution,
     world: &World<'_>,
     probe: &mut impl Probe,
 ) -> StrokeResult {
@@ -183,7 +187,7 @@ pub fn play(
 
 pub fn launch(
     input: &StrokeInput,
-    execution: DeliveryExecution,
+    execution: Execution,
     world: &World<'_>,
     probe: &mut impl Probe,
 ) -> Launch {
@@ -197,12 +201,17 @@ pub fn launch(
     )
 }
 
-pub fn nominal_execution(input: &StrokeInput) -> DeliveryExecution {
-    DeliveryExecution {
-        power: input.delivery.address.swing_length,
-        strike_m: Some(Vec2::ZERO),
-        ..DeliveryExecution::default()
-    }
+pub fn nominal_execution(input: &StrokeInput) -> Execution {
+    let spec = swing_spec(input, Assists::default());
+    exact(
+        &spec,
+        Swing::Exact {
+            power: spec.target_power,
+            timing_fault: 0.0,
+            strike_m: Some(Vec2::ZERO),
+        },
+        0,
+    )
 }
 
 /// The nominal shot in the world's mean air, with noise and playback disabled.
@@ -332,7 +341,7 @@ fn nominal_request(input: &StrokeInput, world: &World<'_>) -> ShotRequest {
 
 fn request(
     input: &StrokeInput,
-    execution: DeliveryExecution,
+    execution: Execution,
     with_noise: bool,
     probe: &mut impl Probe,
 ) -> (ShotRequest, Real) {
