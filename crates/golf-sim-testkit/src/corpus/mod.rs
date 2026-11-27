@@ -386,7 +386,7 @@ impl FixtureRun {
             Runner::PhysicsContact => physics::contact::run(case, drift)?,
             Runner::PhysicsImpact => physics::impact::compare(case, course, drift)?,
             Runner::PhysicsFacade => physics::facade(case, course, drift)?,
-            Runner::PhysicsStrokes => physics::strokes(case, course)?,
+            Runner::PhysicsStrokes => physics::strokes(case, course, drift)?,
             Runner::WorldConstant => world::replay(case, course, shared_ground, drift)?,
             Runner::StrokeDelivery => stroke::delivery::run(case),
             Runner::StrokeFacade => stroke::facade(case, course, drift),

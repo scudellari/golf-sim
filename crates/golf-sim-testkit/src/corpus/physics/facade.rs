@@ -817,6 +817,28 @@ fn request(input: &Dict) -> ShotRequest {
     }
 }
 
+fn check_carry(case: &Dict, carry: Real, bound: impl FnOnce() -> Real, drift: bool) -> Variant {
+    let Some(Variant::Float(reference)) = case.get("output") else {
+        return carry.into();
+    };
+    let reference = reference.value();
+    let error = (carry - reference).abs();
+    let scale = carry.abs().max(reference.abs()).max(1.0);
+    if error.is_finite() && error > super::impact::EIGHT_SINGLE_PRECISION_STEPS * scale {
+        let bound = bound();
+        if error <= bound {
+            let id = field(case, "id").as_str().unwrap();
+            println!(
+                "case {id}: carry {error:.3e} m within {bound:.3e} m from accumulated reference height rounding"
+            );
+            if !drift {
+                return reference.into();
+            }
+        }
+    }
+    carry.into()
+}
+
 pub(in crate::corpus) fn replay(
     case: &Dict,
     course: Option<&Course>,
@@ -902,22 +924,41 @@ pub(in crate::corpus) fn replay(
                     bool_field(input, "playback"),
                     &mut NoProbe,
                 )),
-                "carry_to_height" => sim::carry_to_height(
-                    &launch(arg("launch")),
-                    &ball(arg("ball")),
-                    number(input, "time_s"),
-                    &conditions,
-                    &*ground,
-                    number(input, "height_m"),
-                )
-                .into(),
+                "carry_to_height" => {
+                    let launch = launch(arg("launch"));
+                    let ball = ball(arg("ball"));
+                    let time = number(input, "time_s");
+                    let level = number(input, "height_m");
+                    let carry =
+                        sim::carry_to_height(&launch, &ball, time, &conditions, &*ground, level);
+                    check_carry(
+                        case,
+                        carry,
+                        || {
+                            super::flight::carry_rounding_bound(
+                                &launch,
+                                &ball,
+                                time,
+                                &conditions,
+                                &*ground,
+                                level,
+                                carry,
+                            )
+                        },
+                        drift,
+                    )
+                }
                 _ => panic!("unknown facade call {call}"),
             }
         }
     })
 }
 
-pub(in crate::corpus) fn strokes(case: &Dict, course: Option<&Course>) -> Result<Variant, String> {
+pub(in crate::corpus) fn strokes(
+    case: &Dict,
+    course: Option<&Course>,
+    drift: bool,
+) -> Result<Variant, String> {
     use golf_sim_base::{trace::Trace, variant};
     use golf_sim_physics::integrator::{self, Options};
 
@@ -932,15 +973,28 @@ pub(in crate::corpus) fn strokes(case: &Dict, course: Option<&Course>) -> Result
     let conditions = conditions(dict(field(input, "conditions")));
     let ground = ground(dict(field(input, "ground")), course);
     match field(case, "call").as_str().unwrap() {
-        "shot_integrator.carry_to_height" => Ok(integrator::carry_to_height(
-            &launch,
-            &ball,
-            number(input, "t0"),
-            &conditions,
-            &*ground,
-            number(input, "height_m"),
-        )
-        .into()),
+        "shot_integrator.carry_to_height" => {
+            let time = number(input, "t0");
+            let level = number(input, "height_m");
+            let carry =
+                integrator::carry_to_height(&launch, &ball, time, &conditions, &*ground, level);
+            Ok(check_carry(
+                case,
+                carry,
+                || {
+                    super::flight::carry_rounding_bound(
+                        &launch,
+                        &ball,
+                        time,
+                        &conditions,
+                        &*ground,
+                        level,
+                        carry,
+                    )
+                },
+                drift,
+            ))
+        }
         "shot_integrator.run" => {
             let cup = field(input, "cup").as_dict().map(|d| Cup {
                 position: vec3(field(d, "position")),

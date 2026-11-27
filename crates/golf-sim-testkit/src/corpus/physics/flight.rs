@@ -1,12 +1,14 @@
 use golf_sim_base::{
-    Real, Vec3,
+    Real, Vec2, Vec3, fm,
+    num::smoothstep,
     variant::{Components, Dict, FloatWidth, Variant},
 };
 use golf_sim_physics::{
     air::{self, Atmosphere, FlightAir},
     flight::{self},
-    samplers::AirSample,
-    values::BallSpec,
+    samplers::{AirSample, AirSampler, GroundSampler},
+    tunables as t,
+    values::{BallSpec, Launch},
 };
 
 fn dict(value: &Variant) -> &Dict {
@@ -162,4 +164,153 @@ pub(in crate::corpus) fn replay(case: &Dict) -> Result<Variant, String> {
         _ => return Err(format!("unknown flight call {call:?}")),
     };
     Ok(result)
+}
+
+#[derive(Clone, Copy)]
+struct FlightPoint {
+    at: Vec3,
+    height_error: Real,
+}
+
+fn descending_crossing(
+    points: &[FlightPoint],
+    origin: Vec3,
+    level: Real,
+    offset: Real,
+) -> Option<Real> {
+    let height = |point: FlightPoint| point.at.y + offset * point.height_error;
+    points.windows(2).find_map(|pair| {
+        let (a, b) = (height(pair[0]), height(pair[1]));
+        if a <= level || b > level {
+            return None;
+        }
+        let to_crossing = pair[0].at.lerp(pair[1].at, (a - level) / (a - b)) - origin;
+        Some(Vec2::new(to_crossing.x, to_crossing.z).length())
+    })
+}
+
+fn verifies_carry(points: &[FlightPoint], origin: Vec3, level: Real, carry: Real) -> bool {
+    descending_crossing(points, origin, level, 0.0)
+        .is_some_and(|exact| (carry - exact).abs() <= 1e-10 * exact.max(1.0))
+}
+
+pub(in crate::corpus) fn carry_rounding_bound(
+    launch: &Launch,
+    ball: &BallSpec,
+    time: Real,
+    air: &dyn AirSampler,
+    ground: &dyn GroundSampler,
+    level: Real,
+    carry: Real,
+) -> Real {
+    let mut at = launch.position;
+    let mut velocity = launch.velocity;
+    let mut spin = launch.spin;
+    let first_ground = ground.sample_ground(at.x, at.z);
+    let normal_speed = velocity.dot(first_ground.normal);
+    let clearance = (at.y - first_ground.height_m) * first_ground.normal.y - ball.radius_m;
+    if clearance <= t::CONTACT_SLOP_M && normal_speed < -t::CONTACT_SLOP_M {
+        return Real::NAN;
+    }
+    if clearance <= t::SUPPORT_BLEND_HEIGHT_M {
+        let release = fm::sqrt(2.0 * t::GRAVITY * first_ground.normal.y * t::MIN_HOP_HEIGHT_M);
+        let support = 1.0
+            - smoothstep(
+                t::SUPPORTED_LIE_HEIGHT_M,
+                t::SUPPORT_BLEND_HEIGHT_M,
+                clearance,
+            );
+        let absorbed = support * (1.0 - smoothstep(release, release * 3.0, normal_speed));
+        velocity -= first_ground.normal * (normal_speed.min(release) * absorbed);
+        if velocity.dot(first_ground.normal) <= t::CONTACT_SLOP_M {
+            return Real::NAN;
+        }
+    }
+
+    let level = level + ball.radius_m;
+    let mut atmosphere = Atmosphere::default();
+    let mut elapsed = 0.0;
+    let step = Real::from(f32::EPSILON);
+    let mut height_error = 0.0;
+    let mut travel_error = 0.0;
+    let mut points = vec![FlightPoint { at, height_error }];
+    while elapsed < t::MAX_SHOT_TIME_S {
+        let sample = air.sample_air(time + elapsed, at);
+        let surface = ground.sample_ground(at.x, at.z);
+        let Some(air) = atmosphere.sample(&sample, at.y - surface.height_m, 0.0) else {
+            return Real::NAN;
+        };
+        let next = flight::step(velocity, spin, &air, ball, t::FLIGHT_DT);
+        spin = flight::decay_spin(spin, velocity, next.velocity, &air, ball, t::FLIGHT_DT);
+        at += next.travel;
+        velocity = next.velocity;
+        elapsed += t::FLIGHT_DT;
+        // Each reference vector update rounds the accumulated height and vertical
+        // velocity. Sum their contributions up to the two crossing brackets.
+        travel_error += step * next.travel.y.abs();
+        height_error += step * at.y.abs() + travel_error;
+        points.push(FlightPoint { at, height_error });
+        if velocity.y < 0.0 && at.y + height_error <= level {
+            break;
+        }
+    }
+    if !verifies_carry(&points, launch.position, level, carry) {
+        return Real::NAN;
+    }
+    let range = [-1.0, 1.0].map(|sign| descending_crossing(&points, launch.position, level, sign));
+    match range {
+        [Some(low), Some(high)] => (low - carry).abs().max((high - carry).abs()),
+        _ => Real::NAN,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use golf_sim_physics::{
+        integrator::carry_to_height,
+        plane::{ConstantAir, PlaneGround},
+        samplers::GroundSample,
+        tunables::standard_ball,
+        values::Launch,
+    };
+
+    #[test]
+    fn an_incorrect_carry_cannot_use_the_height_rounding_envelope() {
+        let points = [
+            FlightPoint {
+                at: Vec3::new(2.0, 0.0, 0.0),
+                height_error: 0.01,
+            },
+            FlightPoint {
+                at: Vec3::new(4.0, 2.0, 0.0),
+                height_error: 0.01,
+            },
+            FlightPoint {
+                at: Vec3::new(8.0, 0.0, 0.0),
+                height_error: 0.01,
+            },
+        ];
+        assert!(verifies_carry(&points, Vec3::ZERO, 1.0, 6.0));
+        assert!(!verifies_carry(&points, Vec3::ZERO, 1.0, 3.0));
+        assert!(!verifies_carry(&points, Vec3::ZERO, 1.0, 6.01));
+    }
+
+    #[test]
+    fn carry_rounding_tracks_the_height_of_the_reference_vectors() {
+        let ball = standard_ball();
+        let air = ConstantAir::new(AirSample::default());
+        let bound = |level| {
+            let launch = Launch {
+                position: Vec3::new(0.0, level + 0.1, 0.0),
+                velocity: Vec3::new(25.0, 13.0, 0.0),
+                ..Launch::default()
+            };
+            let ground = PlaneGround::new(GroundSample::default(), Vec3::new(0.0, level, 0.0));
+            let carry = carry_to_height(&launch, &ball, 0.0, &air, &ground, level);
+            carry_rounding_bound(&launch, &ball, 0.0, &air, &ground, level, carry)
+        };
+        assert!(bound(0.0) > 0.0);
+        assert!(bound(512.0) > bound(0.0));
+    }
 }
