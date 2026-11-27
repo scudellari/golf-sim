@@ -243,71 +243,64 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
 }
 
 #[test]
-fn golf_checks_and_reports_drift_for_every_phase_one_fixture() {
+fn golf_checks_and_reports_drift_for_every_fixture() {
     let root = workspace().join("testdata");
     let golf = golf_binary();
-    for layer in ["course", "physics", "world", "stroke"] {
-        let mut fixtures: Vec<_> = fs::read_dir(root.join(layer))
-            .unwrap()
-            .map(|entry| entry.unwrap().path().join("fixture.bin"))
-            .filter(|path| path.is_file())
-            .collect();
-        assert!(!fixtures.is_empty(), "{layer}");
-        fixtures.sort();
-
-        for path in fixtures {
-            let invoke = |action: &str, explicit_layer: bool| {
-                let mut command = Command::new(golf);
-                command.args(["corpus", action]).arg(&path);
-                if explicit_layer {
-                    command.args(["--layer", layer]);
-                }
-                let output = command.output().unwrap();
-                assert!(
-                    output.status.success(),
-                    "{action} {}: {}",
-                    path.display(),
-                    text(&output.stderr)
-                );
-                String::from_utf8(output.stdout).unwrap()
-            };
-            let check = invoke("check", false);
-            let drift = invoke("drift", true);
-            let checked = check.lines().last().unwrap();
-            let checked_count: usize = checked
-                .strip_prefix("checked ")
-                .unwrap()
-                .split(' ')
-                .next()
-                .unwrap()
-                .parse()
-                .unwrap();
-            assert!(checked_count > 0, "{}", path.display());
-            let skipped = |report: &str| {
-                report
-                    .lines()
-                    .filter(|line| line.starts_with("skipped case "))
-                    .map(str::to_owned)
-                    .collect::<Vec<_>>()
-            };
-            let envelope = corpus::read(&path).unwrap();
-            let Some(Variant::Array(cases)) = envelope.as_dict().unwrap().get("cases") else {
-                panic!("expected fixture cases");
-            };
-            let skips = skipped(&check);
-            assert_eq!(checked_count + skips.len(), cases.items.len());
-            assert_eq!(skips, skipped(&drift));
-            let numeric_fields = drift
-                .lines()
-                .filter(|line| line.contains(": max abs "))
-                .count();
-            assert!(numeric_fields > 0, "{}", path.display());
-            println!(
-                "{}: {checked}, {} skipped, drift reported {numeric_fields} numeric fields",
-                path.strip_prefix(&root).unwrap().display(),
-                skips.len(),
+    for path in fixture_paths(&root) {
+        let envelope = corpus::read(&path).unwrap();
+        let header = envelope.as_dict().unwrap();
+        let key = header.get("layer").and_then(Variant::as_str).unwrap();
+        let layer = key.split_once('/').map_or(key, |(layer, _)| layer);
+        let invoke = |action: &str, explicit_layer: bool| {
+            let mut command = Command::new(golf);
+            command.args(["corpus", action]).arg(&path);
+            if explicit_layer {
+                command.args(["--layer", layer]);
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{action} {}: {}",
+                path.display(),
+                text(&output.stderr)
             );
-        }
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let check = invoke("check", false);
+        let drift = invoke("drift", true);
+        let checked = check.lines().last().unwrap();
+        let checked_count: usize = checked
+            .strip_prefix("checked ")
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(checked_count > 0, "{}", path.display());
+        let skipped = |report: &str| {
+            report
+                .lines()
+                .filter(|line| line.starts_with("skipped case "))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let Some(Variant::Array(cases)) = header.get("cases") else {
+            panic!("expected fixture cases");
+        };
+        let skips = skipped(&check);
+        assert_eq!(checked_count + skips.len(), cases.items.len());
+        assert_eq!(skips, skipped(&drift));
+        let numeric_fields = drift
+            .lines()
+            .filter(|line| line.contains(": max abs "))
+            .count();
+        assert!(numeric_fields > 0, "{}", path.display());
+        println!(
+            "{}: {checked}, {} skipped, drift reported {numeric_fields} numeric fields",
+            path.strip_prefix(&root).unwrap().display(),
+            skips.len(),
+        );
     }
 
     let work = TempDir::new();
@@ -327,6 +320,120 @@ fn golf_checks_and_reports_drift_for_every_phase_one_fixture() {
         );
         print!("{action}: {}", text(&output.stderr));
     }
+}
+
+#[test]
+fn golf_names_the_first_different_stroke_in_a_record() {
+    let data = workspace().join("testdata");
+    let work = TempDir::new();
+    let record_path = work.0.join("records/holes/export.bin");
+    let transitions_path = work.0.join("rules/transitions/export.bin");
+    let course_dir = work.0.join("course");
+    for path in [
+        record_path.parent().unwrap(),
+        transitions_path.parent().unwrap(),
+        &course_dir,
+    ] {
+        fs::create_dir_all(path).unwrap();
+    }
+    for name in ["manifest.json", "course.payload"] {
+        fs::copy(
+            data.join("courses/test-course").join(name),
+            course_dir.join(name),
+        )
+        .unwrap();
+    }
+
+    let Variant::Dict(mut records) = corpus::read(&data.join("records/holes/fixture.bin")).unwrap()
+    else {
+        panic!("expected records fixture");
+    };
+    let Some(Variant::Array(records_cases)) = records.get_mut("cases") else {
+        panic!("expected record cases");
+    };
+    records_cases.items.truncate(1);
+    let id = records_cases.items[0]
+        .as_dict()
+        .unwrap()
+        .get("id")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    write_fixture(&record_path, &Variant::Dict(records));
+
+    let Variant::Dict(mut transitions) =
+        corpus::read(&data.join("rules/transitions/fixture.bin")).unwrap()
+    else {
+        panic!("expected transitions fixture");
+    };
+    let Some(Variant::Array(transitions_cases)) = transitions.get_mut("cases") else {
+        panic!("expected transition cases");
+    };
+    let prefix = format!("{id}/rules.after_stroke/");
+    let row = transitions_cases
+        .items
+        .iter_mut()
+        .find_map(|case| {
+            let Variant::Dict(case) = case else {
+                unreachable!()
+            };
+            if !case
+                .get("id")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .starts_with(&prefix)
+            {
+                return None;
+            }
+            let Some(Variant::Dict(input)) = case.get_mut("input") else {
+                unreachable!()
+            };
+            matches!(input.get("attempt"), Some(Variant::Int(attempt)) if attempt.value() == 0)
+                .then_some(input)
+        })
+        .unwrap();
+    let Some(Variant::Dict(outcome)) = row.get_mut("outcome") else {
+        panic!("expected a stroke outcome");
+    };
+    *outcome.get_mut("end").unwrap() = 1_i64.into();
+    write_fixture(&transitions_path, &Variant::Dict(transitions));
+
+    let invoke = |action: &str| {
+        Command::new(golf_binary())
+            .current_dir(&work.0)
+            .args(["corpus", action])
+            .arg(&record_path)
+            .arg("--course-dir")
+            .arg(&course_dir)
+            .output()
+            .unwrap()
+    };
+    let check = invoke("check");
+    assert_eq!(check.status.code(), Some(1));
+    let drift = invoke("drift");
+    assert!(drift.status.success(), "{}", text(&drift.stderr));
+    for report in [text(&check.stderr), text(&drift.stdout)] {
+        assert!(report.contains(&id), "{report}");
+        assert!(report.contains("stroke 0: end 1 -> 0"), "{report}");
+        assert!(!report.contains("stroke_1_rest"), "{report}");
+        print!("{report}");
+    }
+}
+
+fn fixture_paths(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            paths.extend(fixture_paths(&entry.path()));
+        } else if entry.file_name() == "fixture.bin" {
+            paths.push(entry.path());
+        }
+    }
+    paths.sort();
+    paths
 }
 
 #[test]

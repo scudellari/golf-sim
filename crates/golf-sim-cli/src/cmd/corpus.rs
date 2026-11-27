@@ -8,6 +8,9 @@ use super::Outcome;
 #[derive(Subcommand)]
 pub enum Command {
     /// Compare the core with recorded reference fixtures.
+    ///
+    /// Keep companion fixtures in their corpus directories beside the input layer.
+    /// Hole advice and observation use records/holes. Hole records use rules/transitions.
     Corpus(CorpusArgs),
 }
 

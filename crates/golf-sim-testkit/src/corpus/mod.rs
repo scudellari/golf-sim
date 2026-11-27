@@ -2,19 +2,27 @@
 
 mod course;
 mod courses;
+mod foundation;
+pub mod hole;
 pub mod physics;
+mod projection;
+pub mod rules;
 pub mod stroke;
+pub mod swing;
 mod world;
 
 use std::{
     error::Error,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use golf_sim_base::{
     corpus,
     variant::{Dict, Variant},
 };
+
+use golf_sim_course::course::Course;
 
 use crate::tolerance::{self, CheckReport, DriftReport, Fixture};
 
@@ -25,6 +33,9 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Runner {
     Variant,
+    MathPrims,
+    SeedStreams,
+    GeometryCases,
     CourseGrids,
     CourseQueries,
     PhysicsValues,
@@ -36,12 +47,34 @@ enum Runner {
     WorldConstant,
     StrokeDelivery,
     StrokeFacade,
+    SwingStreams,
+    RulesTransitions,
+    RulesRelief,
+    RecordsHoles,
+    HoleAdvice,
+    HoleObserve,
 }
 
 impl Runner {
+    fn projects(self) -> bool {
+        matches!(
+            self,
+            Self::MathPrims
+                | Self::SeedStreams
+                | Self::GeometryCases
+                | Self::RulesRelief
+                | Self::RecordsHoles
+                | Self::HoleAdvice
+                | Self::HoleObserve
+        )
+    }
+
     fn for_key(key: &str) -> Result<Self> {
         Ok(match key {
             "variant" | "variant/digests" => Self::Variant,
+            "math/prims" => Self::MathPrims,
+            "seed/streams" => Self::SeedStreams,
+            "geometry/cases" => Self::GeometryCases,
             "course/grids" => Self::CourseGrids,
             "course/queries" => Self::CourseQueries,
             "physics/values" => Self::PhysicsValues,
@@ -53,6 +86,12 @@ impl Runner {
             "world/constant" => Self::WorldConstant,
             "stroke/delivery" => Self::StrokeDelivery,
             "stroke/facade" => Self::StrokeFacade,
+            "swing/streams" => Self::SwingStreams,
+            "rules/transitions" => Self::RulesTransitions,
+            "rules/relief" => Self::RulesRelief,
+            "records/holes" => Self::RecordsHoles,
+            "hole/advice" => Self::HoleAdvice,
+            "hole/observe" => Self::HoleObserve,
             _ => return Err(format!("no corpus runner for fixture key {key:?}").into()),
         })
     }
@@ -61,9 +100,12 @@ impl Runner {
 pub struct FixtureRun {
     runner: Runner,
     layer: String,
+    key: String,
     path: PathBuf,
     header_course: Option<Dict>,
     courses: Courses,
+    testdata: PathBuf,
+    projected_header: Option<Dict>,
     query_checks: course::QueryChecks,
     scratch: Option<generated::WithDepartures>,
 }
@@ -100,9 +142,12 @@ impl FixtureRun {
         Ok(Self {
             runner,
             layer: fixture_layer.to_owned(),
+            key: key.to_owned(),
             path: path.to_owned(),
             header_course,
             courses: Courses::new(roots),
+            testdata,
+            projected_header: runner.projects().then(|| header.clone()),
             query_checks: course::QueryChecks::default(),
             scratch,
         })
@@ -113,6 +158,12 @@ impl FixtureRun {
     }
 
     pub fn check_observing(mut self, mut observe: impl FnMut(&Dict)) -> Result<CheckReport> {
+        if let Some(projected) = self.project(false)? {
+            return tolerance::check(&projected.path(), &self.layer, |case| {
+                observe(case);
+                Ok::<_, std::convert::Infallible>(projected.actual(case))
+            });
+        }
         let path = self.path_for_comparison();
         let layer = self.layer.clone();
         let report = tolerance::check(&path, &layer, |case| {
@@ -130,6 +181,11 @@ impl FixtureRun {
     }
 
     pub fn drift(mut self) -> Result<DriftReport> {
+        if let Some(projected) = self.project(true)? {
+            return Fixture::read(&projected.path())?.drift(&self.layer, |case| {
+                Ok::<_, std::convert::Infallible>(projected.actual(case))
+            });
+        }
         let fixture = Fixture::read(&self.path_for_comparison())?;
         let layer = self.layer.clone();
         let report = fixture.drift(&layer, |case| self.run(case, true));
@@ -145,7 +201,75 @@ impl FixtureRun {
             .map_or_else(|| self.path.clone(), generated::WithDepartures::fixture)
     }
 
-    fn run(&mut self, case: &Dict, drift: bool) -> Result<Variant> {
+    fn project(&mut self, drift: bool) -> Result<Option<projection::Projection>> {
+        let Some(header) = self.projected_header.take() else {
+            return Ok(None);
+        };
+        let (pairs, tolerance_layer) = match self.runner {
+            Runner::MathPrims | Runner::SeedStreams | Runner::GeometryCases => (
+                projection::rows(&header)
+                    .map(|case| foundation::project(self.runner, case, drift))
+                    .collect::<Result<_>>()?,
+                None,
+            ),
+            Runner::RulesRelief => (rules::project(self, &header, drift)?, Some("relief")),
+            Runner::RecordsHoles => (hole::records(self, &header, drift)?, Some("hole")),
+            Runner::HoleAdvice | Runner::HoleObserve => {
+                (hole::addresses(self, &header, drift)?, None)
+            }
+            _ => unreachable!("runner uses unprojected output"),
+        };
+        let departures = if self.runner == Runner::RulesRelief {
+            projection::rows(&header)
+                .filter(|case| rules::uses_generated_stroke(case))
+                .map(|case| (projection::id(case), "requires the day generator"))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Ok(Some(projection::Projection::write(
+            &header,
+            &self.testdata,
+            tolerance_layer,
+            pairs,
+            departures,
+        )?))
+    }
+
+    fn companion(&self, key: &str) -> Result<Variant> {
+        let file = self.path.file_name().ok_or("fixture has no filename")?;
+        let candidate = self
+            .path
+            .parent()
+            .filter(|dir| dir.ends_with(&self.key))
+            .and_then(|dir| dir.parent()?.parent())
+            .map(|root| root.join(key));
+        let path = candidate
+            .into_iter()
+            .flat_map(|dir| [dir.join(file), dir.join("fixture.bin")])
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| self.testdata.join(key).join("fixture.bin"));
+        let companion =
+            corpus::read(&path).map_err(|error| format!("companion {key:?}: {error}"))?;
+        if companion
+            .as_dict()
+            .and_then(|header| header.get("layer"))
+            .and_then(Variant::as_str)
+            != Some(key)
+        {
+            return Err(
+                format!("{}: expected companion fixture key {key:?}", path.display()).into(),
+            );
+        }
+        Ok(companion)
+    }
+
+    fn require_course(&mut self, case: &Dict) -> Result<Arc<Course>> {
+        self.resolve_course(case)?
+            .ok_or_else(|| "fixture has no course identity".into())
+    }
+
+    fn resolve_course(&mut self, case: &Dict) -> Result<Option<Arc<Course>>> {
         let input = child(case, "input");
         let world = input.and_then(|input| child(input, "world"));
         let ground = world.or(input).and_then(|args| child(args, "ground"));
@@ -159,11 +283,15 @@ impl FixtureRun {
             })
             .or_else(|| input.and_then(|input| child(input, "course")))
             .or_else(|| child(case, "course"));
-        let course = identity
+        Ok(identity
             .or(self.header_course.as_ref())
             .map(|identity| self.courses.open(identity))
-            .transpose()?;
-        let course = course.as_deref();
+            .transpose()?)
+    }
+
+    fn run(&mut self, case: &Dict, drift: bool) -> Result<Variant> {
+        let resolved = self.resolve_course(case)?;
+        let course = resolved.as_deref();
 
         Ok(match self.runner {
             Runner::Variant => tolerance::variant_snapshot(case)?,
@@ -185,6 +313,17 @@ impl FixtureRun {
             Runner::WorldConstant => world::replay(case, course),
             Runner::StrokeDelivery => stroke::delivery::run(case),
             Runner::StrokeFacade => stroke::facade(case, course, drift),
+            Runner::SwingStreams => swing::run(case),
+            Runner::RulesTransitions => rules::run(case, drift)?,
+            Runner::MathPrims
+            | Runner::SeedStreams
+            | Runner::GeometryCases
+            | Runner::RulesRelief
+            | Runner::RecordsHoles
+            | Runner::HoleAdvice
+            | Runner::HoleObserve => {
+                unreachable!("runner uses projected output")
+            }
         })
     }
 }
