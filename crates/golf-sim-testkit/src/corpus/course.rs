@@ -1362,8 +1362,8 @@ fn crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, length: Real) -> Opti
         return None;
     }
     let up = Vec3::new(0.0, 1.0, 0.0);
-    let start = origin - tree.base - up * tree.crown_base_m;
     if !tree.cone {
+        let start = origin - tree.base - up * tree.crown_base_m;
         let radii = Vec3::new(radius, height * 0.5, radius);
         let p = (start - up * (height * 0.5)).cdiv(radii);
         return if p.length_squared() <= 1.0 {
@@ -1372,60 +1372,82 @@ fn crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, length: Real) -> Opti
             ellipse_entry(p, (direction * length).cdiv(radii), 1.0).map(|t| t * length)
         };
     }
-    let slope = radius / height;
-    let clearance = |p: Vec3| {
-        Vec2::new(p.x, p.z).length_squared() - (slope * (height - p.y)) * (slope * (height - p.y))
+    let from_tip = origin - tree.base - up * tree.height_m;
+    // Shift the ray into the crown's height range before measuring cancellation.
+    let (offset, y) = if direction.y == 0.0 || (-height..=0.0).contains(&from_tip.y) {
+        (0.0, from_tip.y)
+    } else if from_tip.y > 0.0 {
+        (-from_tip.y / direction.y, 0.0)
+    } else {
+        ((-height - from_tip.y) / direction.y, -height)
     };
+    if !(0.0..=length).contains(&offset) {
+        return None;
+    }
+    let start = Vec3 {
+        y,
+        ..from_tip + direction * offset
+    };
+    let length = length - offset;
+    let travel = Vec2::new(direction.x, direction.z);
+    let radial = Vec2::new(start.x, start.z);
+    let slope = radius / height;
     let within = |s: Real| {
         let p = start + direction * s;
-        (0.0..=height).contains(&p.y) && clearance(p) <= 1e-11
+        let vertical_at_s = slope * p.y;
+        (-height..=0.0).contains(&p.y)
+            && Vec2::new(p.x, p.z).length_squared() - vertical_at_s * vertical_at_s <= 1e-11
     };
-    if within(0.0) {
-        return Some(0.0);
+    if offset == 0.0 && within(0.0) {
+        return Some(offset);
     }
-    let travel_squared = Vec2::new(direction.x, direction.z).length_squared();
+    let travel_squared = travel.length_squared();
     let vertical = slope * direction.y;
+    let vertical_start = slope * y;
     let vertical_squared = vertical * vertical;
-    let cross_x = start.x * direction.x;
-    let cross_z = start.z * direction.z;
-    let mixed = slope * slope * (height - start.y) * direction.y;
-    let radial_squared = Vec2::new(start.x, start.z).length_squared();
-    let from_tip = slope * (height - start.y);
-    let tip_squared = from_tip * from_tip;
+    let cross_x = radial.x * travel.x;
+    let cross_z = radial.y * travel.y;
+    let mixed = vertical_start * vertical;
+    let radial_squared = radial.length_squared();
+    let tip_squared = vertical_start * vertical_start;
     let a = travel_squared - vertical_squared;
-    let half_b = cross_x + cross_z + mixed;
+    let half_b = cross_x + cross_z - mixed;
     let c = radial_squared - tip_squared;
     // Scale cancellation error by the terms of each coefficient before summing them.
     let roundoff = 8.0 * Real::EPSILON;
-    let base = -start.y / direction.y;
+    let tip_roundoff = roundoff * radius;
+    let at_tip = y == 0.0 && radial_squared <= tip_roundoff * tip_roundoff;
     if direction.y != 0.0
         && a.abs() <= roundoff * (travel_squared + vertical_squared)
-        && half_b.abs() <= roundoff * (cross_x.abs() + cross_z.abs() + mixed.abs())
-        && c.abs() <= roundoff * (radial_squared + tip_squared)
+        && (at_tip
+            || half_b.abs() <= roundoff * (cross_x.abs() + cross_z.abs() + mixed.abs())
+                && c.abs() <= roundoff * (radial_squared + tip_squared))
     {
-        let tip = (height - start.y) / direction.y;
-        let entry = base.min(tip).max(0.0);
-        let exit = base.max(tip).min(length);
-        return (entry <= exit).then_some(entry);
+        return Some(offset);
     }
     let discriminant = half_b * half_b - a * c;
     let mut candidates = [Real::INFINITY; 3];
     if direction.y != 0.0 {
-        candidates[0] = base;
+        candidates[0] = (-height - y) / direction.y;
     }
-    if a.abs() < 1e-14 {
+    if a == 0.0 {
         if half_b != 0.0 {
             candidates[1] = -c / (2.0 * half_b);
         }
     } else if discriminant >= 0.0 {
-        let root = fm::sqrt(discriminant);
-        candidates[1] = (-half_b - root) / a;
-        candidates[2] = (-half_b + root) / a;
+        let numerator = -half_b - fm::sqrt(discriminant).copysign(half_b);
+        if numerator == 0.0 {
+            candidates[1] = 0.0;
+        } else {
+            candidates[1] = numerator / a;
+            candidates[2] = c / numerator;
+        }
     }
     candidates
         .into_iter()
         .filter(|&s| (0.0..=length).contains(&s) && within(s))
         .min_by(Real::total_cmp)
+        .map(|s| offset + s)
 }
 
 fn matches_ray_entry(actual: Real, first: Real) -> bool {
@@ -1595,6 +1617,24 @@ mod tests {
         let below = Vec3::new(-6.0, -3.0, -8.0);
         let distance = crown_entry(&tree, below, -direction, 7.0).expect("ray hits the base");
         assert!((distance - fm::sqrt(41.0)).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn distant_ray_passing_beside_the_cone_tip_misses() {
+        let tree = Tree {
+            id: "synthetic".into(),
+            species_index: 0,
+            base: Vec3::ZERO,
+            height_m: 5.0,
+            trunk_radius_m: 0.05,
+            crown_base_m: 1.0,
+            crown_radius_m: 4.0,
+            density: 1.0,
+            cone: true,
+        };
+        let origin = Vec3::new(1e8, 1e8 + 5.0, 3.0);
+        let direction = Vec3::new(-1.0 - 2.0 * Real::EPSILON, -1.0, 0.0).normalized();
+        assert_eq!(crown_entry(&tree, origin, direction, 1.5e8), None);
     }
 
     #[test]

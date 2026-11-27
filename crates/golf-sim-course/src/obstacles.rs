@@ -217,20 +217,36 @@ fn ray_crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, limit: Real) -> O
     if tree.density <= 0.0 || height <= 0.0 || radius <= 0.0 {
         return None;
     }
-    let base = tree.base + UP * tree.crown_base_m;
-    let start = origin - base;
     let (a, b, c) = if tree.cone {
+        let from_tip = origin - tree.base - UP * tree.height_m;
+        // Form the quadratic where the ray reaches the crown's height range,
+        // so the coefficient scales reflect the crown instead of the distance to it.
+        let (offset, y) = if direction.y == 0.0 || (-height..=0.0).contains(&from_tip.y) {
+            (0.0, from_tip.y)
+        } else if from_tip.y > 0.0 {
+            (-from_tip.y / direction.y, 0.0)
+        } else {
+            ((-height - from_tip.y) / direction.y, -height)
+        };
+        if !(0.0..=limit).contains(&offset) {
+            return None;
+        }
+        let start = Vec3 {
+            y,
+            ..from_tip + direction * offset
+        };
+        let limit = limit - offset;
         let slope = radius / height;
-        let radial = plan(start);
         let travel = plan(direction);
-        let from_tip = (height - start.y) * slope;
+        let radial = plan(start);
+        let vertical_start = y * slope;
         let vertical = direction.y * slope;
         let radial_squared = radial.length_squared();
-        let tip_squared = from_tip * from_tip;
-        let base_contact = -start.y / direction.y;
-        if start.y >= 0.0 && start.y <= height && radial_squared <= tip_squared {
-            return Some(0.0);
+        let tip_squared = vertical_start * vertical_start;
+        if (-height..=0.0).contains(&y) && radial_squared <= tip_squared {
+            return Some(offset);
         }
+        let base_contact = (-height - y) / direction.y;
         let base_entry = if (0.0..=limit).contains(&base_contact)
             && direction.y > 0.0
             && plan(start + direction * base_contact).length_squared() <= radius * radius
@@ -241,33 +257,37 @@ fn ray_crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, limit: Real) -> O
         };
         let travel_squared = travel.length_squared();
         let vertical_squared = vertical * vertical;
-        let mixed = from_tip * vertical;
+        let mixed = vertical_start * vertical;
         let a = travel_squared - vertical_squared;
-        let b = radial.dot(travel) + mixed;
+        let b = radial.dot(travel) - mixed;
         let c = radial_squared - tip_squared;
         let b_scale = (radial.x * travel.x).abs() + (radial.y * travel.y).abs() + mixed.abs();
         // Normalization and coefficient arithmetic can leave roundoff after cancellation.
         // Scale each residual by the magnitudes of its terms before they cancel.
         let roundoff = 8.0 * Real::EPSILON;
+        // At the tip, the projection can leave a small residual even for a ray along the side.
+        let tip_roundoff = roundoff * radius;
+        let at_tip = y == 0.0 && radial_squared <= tip_roundoff * tip_roundoff;
         if direction.y != 0.0
             && a.abs() <= roundoff * (travel_squared + vertical_squared)
-            && b.abs() <= roundoff * b_scale
-            && c.abs() <= roundoff * (radial_squared + tip_squared)
+            && (at_tip
+                || b.abs() <= roundoff * b_scale
+                    && c.abs() <= roundoff * (radial_squared + tip_squared))
         {
-            let tip_contact = (height - start.y) / direction.y;
-            let entry = base_contact.min(tip_contact).max(0.0);
-            let exit = base_contact.max(tip_contact).min(limit);
-            return (entry <= exit).then_some(entry);
+            return Some(offset);
         }
         return [base_entry]
             .into_iter()
             .chain(ray_roots(a, b, c))
             .filter(|&s| {
                 (0.0..=limit).contains(&s)
-                    && (-1e-12..=height + 1e-12).contains(&(start.y + direction.y * s))
+                    && (-height - 1e-12..=1e-12).contains(&(y + direction.y * s))
             })
-            .min_by(Real::total_cmp);
+            .min_by(Real::total_cmp)
+            .map(|s| offset + s);
     } else {
+        let base = tree.base + UP * tree.crown_base_m;
+        let start = origin - base;
         let radii = Vec3::new(radius, 0.5 * height, radius);
         let p = (start - UP * (0.5 * height)).cdiv(radii);
         let v = direction.cdiv(radii);
@@ -514,5 +534,23 @@ mod tests {
         let below = Vec3::new(-6.0, -3.0, -8.0);
         let distance = ray_crown_entry(&tree, below, -direction, 7.0).expect("ray hits the base");
         assert!((distance - fm::sqrt(41.0)).abs() <= 1e-12);
+    }
+
+    #[test]
+    fn distant_ray_passing_beside_the_cone_tip_misses() {
+        let tree = Tree {
+            id: "synthetic".into(),
+            species_index: 0,
+            base: Vec3::ZERO,
+            height_m: 5.0,
+            trunk_radius_m: 0.05,
+            crown_base_m: 1.0,
+            crown_radius_m: 4.0,
+            density: 1.0,
+            cone: true,
+        };
+        let origin = Vec3::new(1e8, 1e8 + 5.0, 3.0);
+        let direction = Vec3::new(-1.0 - 2.0 * Real::EPSILON, -1.0, 0.0).normalized();
+        assert_eq!(ray_crown_entry(&tree, origin, direction, 1.5e8), None);
     }
 }
