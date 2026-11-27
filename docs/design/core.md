@@ -451,6 +451,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
+| [C75](https://github.com/scudellari/golf-sim/issues/83) | The stroke cases C74 left open | Tools | codex | C74 | ~400 |
 | [C29](https://github.com/scudellari/golf-sim/issues/31) | Console: building the address and swinging | Console | codex | C26, reference data from the consuming game | ~450 |
 | [C30](https://github.com/scudellari/golf-sim/issues/32) | Console: watching, the hole's screens and the view | Console | codex | C29 | ~450 |
 | [C31](https://github.com/scudellari/golf-sim/issues/33) | The range | Console | codex | C29 | ~450 |
