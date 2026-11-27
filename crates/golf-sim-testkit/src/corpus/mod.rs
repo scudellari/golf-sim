@@ -463,9 +463,13 @@ impl FixtureRun {
             Runner::PhysicsFacade => self
                 .stroke_models
                 .run(|probe| physics::facade(case, course, probe, drift))?,
-            Runner::StrokeFacade => {
-                stroke::facade_with_model(case, course, drift, self.stroke_models)?
-            }
+            Runner::StrokeFacade => stroke::facade_with_model(
+                case,
+                course,
+                drift,
+                self.stroke_models,
+                self.stroke_limits.as_ref().unwrap(),
+            )?,
             _ => unreachable!("not a stroke runner"),
         })
     }

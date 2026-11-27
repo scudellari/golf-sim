@@ -372,6 +372,7 @@ pub(crate) struct Evidence {
     pub rounding: Result<(), String>,
     pub over_bound: String,
     pub threshold: Option<&'static str>,
+    pub time_s: Real,
 }
 
 pub(crate) fn evidence(
@@ -446,6 +447,7 @@ pub(crate) fn evidence(
                     rounding,
                     over_bound: format!("{path} before flight"),
                     threshold: None,
+                    time_s: 0.0,
                 });
             }
         }
@@ -474,6 +476,7 @@ pub(crate) fn evidence(
                 rounding,
                 over_bound,
                 threshold: Some("stop playback tick"),
+                time_s: point.time,
             });
         }
         return Ok(Evidence {
@@ -481,6 +484,7 @@ pub(crate) fn evidence(
             rounding,
             over_bound,
             threshold: point.response,
+            time_s: point.time,
         });
     }
     let diff = limits
@@ -522,6 +526,7 @@ pub(crate) fn evidence(
         rounding,
         over_bound: diff,
         threshold: terminal.map(|(_, kind)| kind),
+        time_s: terminal.map_or(Real::INFINITY, |(time, _)| time),
     })
 }
 

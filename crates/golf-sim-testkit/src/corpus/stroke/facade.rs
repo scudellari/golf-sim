@@ -37,11 +37,11 @@ macro_rules! record {
     };
 }
 
-fn field<'a>(input: &'a Dict, name: &str) -> &'a Variant {
+pub(super) fn field<'a>(input: &'a Dict, name: &str) -> &'a Variant {
     input.get(name).unwrap_or_else(|| panic!("missing {name}"))
 }
 
-fn dict(value: &Variant) -> &Dict {
+pub(super) fn dict(value: &Variant) -> &Dict {
     value.as_dict().unwrap()
 }
 
@@ -63,7 +63,7 @@ fn code(value: &Variant) -> usize {
     usize::try_from(integer(value)).unwrap()
 }
 
-fn number(input: &Dict, name: &str) -> Real {
+pub(super) fn number(input: &Dict, name: &str) -> Real {
     match field(input, name) {
         Variant::Int(number) => number.value() as Real,
         Variant::Float(number) => number.value(),
@@ -86,7 +86,7 @@ fn vector2(value: &Variant) -> Vec2 {
     Vec2::new(x, y)
 }
 
-fn vector3(value: &Variant) -> Vec3 {
+pub(super) fn vector3(value: &Variant) -> Vec3 {
     let Variant::Vector3(vector) = value else {
         panic!("expected a Vector3");
     };
@@ -94,7 +94,7 @@ fn vector3(value: &Variant) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
-fn vector(point: Vec3) -> Variant {
+pub(super) fn vector(point: Vec3) -> Variant {
     Variant::Vector3(Components {
         values: [point.x, point.y, point.z],
         width: FloatWidth::Double,
@@ -152,7 +152,7 @@ fn playback_snapshot(result: &ShotResult) -> Variant {
     }
 }
 
-fn launch_snapshot(launch: Launch) -> Variant {
+pub(super) fn launch_snapshot(launch: Launch) -> Variant {
     let readout = launch.readout;
     record! {
         position: vector(launch.position),
@@ -188,7 +188,7 @@ fn launch_snapshot(launch: Launch) -> Variant {
     }
 }
 
-fn stroke_input(input: &Dict) -> StrokeInput {
+pub(super) fn stroke_input(input: &Dict) -> StrokeInput {
     let lie = dict(field(input, "lie"));
     let address = dict(field(input, "address"));
     StrokeInput {
@@ -377,18 +377,18 @@ fn replay(case: &Dict, world: &World<'_>, probe: &mut impl Probe) -> Variant {
 
 const SINGLE_STEP: Real = 1.0 / 8_388_608.0;
 
-fn fields_mut(value: &mut Variant) -> &mut Dict {
+pub(super) fn fields_mut(value: &mut Variant) -> &mut Dict {
     let Variant::Dict(dict) = value else {
         panic!("expected a dictionary");
     };
     dict
 }
 
-fn magnitude(point: Vec3) -> Real {
+pub(super) fn magnitude(point: Vec3) -> Real {
     point.x.abs().max(point.y.abs()).max(point.z.abs())
 }
 
-fn horizontal(point: Vec3) -> Vec2 {
+pub(super) fn horizontal(point: Vec3) -> Vec2 {
     Vec2::new(point.x, point.z)
 }
 
@@ -400,10 +400,10 @@ fn exceeds_default(a: Real, b: Real, scale: Real) -> bool {
     error.is_finite() && error > bound
 }
 
-struct DerivedChecks<'a> {
-    id: &'a str,
-    drift: bool,
-    failure: Option<String>,
+pub(super) struct DerivedChecks<'a> {
+    pub(super) id: &'a str,
+    pub(super) drift: bool,
+    pub(super) failure: Option<String>,
 }
 
 impl DerivedChecks<'_> {
@@ -437,7 +437,7 @@ impl DerivedChecks<'_> {
         }
     }
 
-    fn launch(&mut self, expected: &Dict, actual: &mut Dict, standalone: bool) {
+    pub(super) fn launch(&mut self, expected: &Dict, actual: &mut Dict, standalone: bool) {
         let a = vector3(field(expected, "velocity"));
         let b = vector3(field(actual, "velocity"));
         let angular_change = fm::atan2(a.cross(b).length(), a.dot(b));
@@ -620,7 +620,11 @@ fn height_crossing_bound(
 
 // Independently check the computation-specific bounds before projecting those values
 // to the fixture. All other values, including the operands, keep their table bounds.
-fn impact_request(input: &StrokeInput, execution: Execution, with_noise: bool) -> ShotRequest {
+pub(super) fn impact_request(
+    input: &StrokeInput,
+    execution: Execution,
+    with_noise: bool,
+) -> ShotRequest {
     let built = delivery::build(&input.delivery, execution, with_noise, &mut NoProbe);
     let mut request = ShotRequest::new(built.club, sim::standard_ball(), built.delivery, built.lie);
     request.position = input.ball_position();
@@ -757,14 +761,22 @@ pub(in crate::corpus) fn run_with_model(
     course: Option<&Course>,
     drift: bool,
     versions: crate::corpus::physics::models::Versions,
+    limits: &crate::tolerance::Layer,
 ) -> Result<crate::tolerance::CaseOutcome, String> {
     use crate::tolerance::CaseOutcome;
 
-    if field(case, "call").as_str() != Some("stroke.play") {
+    let call = field(case, "call").as_str();
+    let has_operands =
+        call == Some("stroke.preview") && dict(field(case, "output")).get("operands").is_some();
+    if call != Some("stroke.play") && !has_operands {
         return run(case, course, drift).map(Into::into);
     }
     let args = dict(field(case, "input"));
     let world = crate::corpus::world::world(dict(field(args, "world")), course);
+    if has_operands {
+        let actual = replay(case, &world, &mut NoProbe);
+        return super::preview::compare(case, &world, limits, actual, drift).map(Into::into);
+    }
     let mut outcome = versions.run(|probe| Ok(replay(case, &world, probe)))?;
     match &mut outcome {
         CaseOutcome::Compared { actual, .. } => {

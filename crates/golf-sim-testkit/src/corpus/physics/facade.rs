@@ -427,7 +427,7 @@ fn code(value: &Variant) -> usize {
     usize::try_from(integer(value)).unwrap()
 }
 
-fn launch(input: &Dict) -> Launch {
+pub(in crate::corpus) fn launch(input: &Dict) -> Launch {
     let n = |name| number(input, name);
     let v = |name| vec3(field(input, name));
     let contact = [
