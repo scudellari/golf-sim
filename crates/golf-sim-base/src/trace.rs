@@ -39,6 +39,9 @@ pub trait Probe {
 
     /// Records a number in the current phase. Call `begin_phase` first.
     fn value(&mut self, name: &str, value: f64, unit: &str, source: Source);
+
+    /// Observes a simulation boundary without adding a field to the serialized trace.
+    fn boundary(&mut self, _name: &'static str, _time_s: f64) {}
 }
 
 /// Discards trace events.

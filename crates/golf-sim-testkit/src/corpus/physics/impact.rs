@@ -1021,6 +1021,53 @@ pub(in crate::corpus) fn compare_launch_rounding(
     Ok(())
 }
 
+pub(in crate::corpus) fn compare_shot_launch(
+    expected: &Dict,
+    actual: &mut Dict,
+    compare: impl FnOnce(&Dict, &mut Dict) -> Result<(), String>,
+) -> Result<(), String> {
+    use golf_sim_physics::values::EventKind;
+    let Some(expected_launch) = expected.get("launch").and_then(Variant::as_dict) else {
+        return Ok(());
+    };
+    let Some(Variant::Dict(launch)) = actual.get_mut("launch") else {
+        return Ok(());
+    };
+
+    let original = launch.clone();
+    compare(expected_launch, launch)?;
+    let corrected = launch.clone();
+    let Some(Variant::Array(events)) = actual.get_mut("events") else {
+        return Ok(());
+    };
+    let Some(Variant::Dict(event)) = events.items.first_mut() else {
+        return Ok(());
+    };
+    let Some(expected_event) = expected
+        .get("events")
+        .and_then(|v| array(v).first())
+        .and_then(Variant::as_dict)
+    else {
+        return Ok(());
+    };
+    let is_impact = |event: &Dict| {
+        matches!(event.get("kind"), Some(Variant::Int(kind))
+        if kind.value() == EventKind::Impact as i64)
+    };
+    if !is_impact(event) || !is_impact(expected_event) {
+        return Ok(());
+    }
+    for key in ["velocity", "spin"] {
+        if original.get(key) == event.get(key)
+            && expected_launch.get(key) == expected_event.get(key)
+            && let Some(value) = corrected.get(key)
+        {
+            *event.get_mut(key).unwrap() = value.clone();
+        }
+    }
+    Ok(())
+}
+
 fn replay(case: &Dict, course: Option<&Course>, drift: bool) -> Result<Variant, String> {
     let call = field(case, "call").as_str().unwrap();
     let input = dict(field(case, "input"));

@@ -3,7 +3,7 @@ use golf_sim_base::{
     digest::object,
     fm,
     geometry::is_point_in_polygon,
-    trace::NoProbe,
+    trace::{NoProbe, Probe},
     variant::{Array, Components, Dict, FloatWidth, Variant},
 };
 use golf_sim_course::course::{Course, LegalKind, Tree, Wall};
@@ -839,9 +839,24 @@ fn check_carry(case: &Dict, carry: Real, bound: impl FnOnce() -> Real, drift: bo
     carry.into()
 }
 
+fn compare_trajectory(
+    case: &Dict,
+    result: &ShotResult,
+    context: super::trajectory::FlightContext<'_>,
+    drift: bool,
+) -> Variant {
+    let mut output = shot_snapshot(result);
+    let Variant::Dict(actual) = &mut output else {
+        unreachable!()
+    };
+    super::trajectory::compare(case, actual, context, drift);
+    output
+}
+
 pub(in crate::corpus) fn replay(
     case: &Dict,
     course: Option<&Course>,
+    probe: &mut impl Probe,
     drift: bool,
 ) -> Result<Variant, String> {
     let call = field(case, "call")
@@ -883,38 +898,72 @@ pub(in crate::corpus) fn replay(
             match call {
                 "strike" => {
                     let request = request(arg("request"));
-                    let mut launch =
-                        launch_snapshot(sim::strike(&request, &conditions, &*ground, &mut NoProbe));
-                    let Variant::Dict(actual) = &mut launch else {
-                        unreachable!()
-                    };
-                    super::impact::compare_launch_rounding(
-                        case,
-                        dict(field(case, "output")),
-                        actual,
-                        &request,
-                        &*ground,
-                        drift,
-                    )?;
-                    launch
+                    let mut actual =
+                        launch_snapshot(sim::strike(&request, &conditions, &*ground, probe));
+                    if let Variant::Dict(output) = &mut actual {
+                        super::impact::compare_launch_rounding(
+                            case,
+                            dict(field(case, "output")),
+                            output,
+                            &request,
+                            &*ground,
+                            drift,
+                        )?;
+                    }
+                    actual
                 }
-                "simulate_shot" => shot_snapshot(&sim::simulate_shot(
-                    &request(arg("request")),
-                    &conditions,
-                    &*ground,
-                    bool_field(input, "playback"),
-                    &mut NoProbe,
-                )),
-                "simulate_launch" => shot_snapshot(&sim::simulate_launch(
-                    &launch(arg("launch")),
-                    &ball(arg("ball")),
-                    number(input, "time_s"),
-                    &conditions,
-                    &*ground,
-                    cup(field(input, "cup")),
-                    bool_field(input, "playback"),
-                    &mut NoProbe,
-                )),
+                "simulate_shot" => {
+                    let request = request(arg("request"));
+                    let result = sim::simulate_shot(
+                        &request,
+                        &conditions,
+                        &*ground,
+                        bool_field(input, "playback"),
+                        probe,
+                    );
+                    let context = super::trajectory::FlightContext {
+                        ball: &request.ball,
+                        air: &conditions,
+                        ground: &*ground,
+                        t0: request.time_s,
+                        dt: golf_sim_physics::tunables::FLIGHT_DT,
+                    };
+                    let mut shot = compare_trajectory(case, &result, context, drift);
+                    if let Variant::Dict(actual) = &mut shot {
+                        super::impact::compare_shot_launch(
+                            dict(field(case, "output")),
+                            actual,
+                            |expected, launch| {
+                                super::impact::compare_launch_rounding(
+                                    case, expected, launch, &request, &*ground, drift,
+                                )
+                            },
+                        )?;
+                    }
+                    shot
+                }
+                "simulate_launch" => {
+                    let ball = ball(arg("ball"));
+                    let time = number(input, "time_s");
+                    let result = sim::simulate_launch(
+                        &launch(arg("launch")),
+                        &ball,
+                        time,
+                        &conditions,
+                        &*ground,
+                        cup(field(input, "cup")),
+                        bool_field(input, "playback"),
+                        probe,
+                    );
+                    let context = super::trajectory::FlightContext {
+                        ball: &ball,
+                        air: &conditions,
+                        ground: &*ground,
+                        t0: time,
+                        dt: golf_sim_physics::tunables::FLIGHT_DT,
+                    };
+                    compare_trajectory(case, &result, context, drift)
+                }
                 "simulate_drop" => shot_snapshot(&sim::simulate_drop(
                     &ball(arg("ball")),
                     vec3(field(input, "release_point")),
@@ -922,7 +971,7 @@ pub(in crate::corpus) fn replay(
                     &conditions,
                     &*ground,
                     bool_field(input, "playback"),
-                    &mut NoProbe,
+                    probe,
                 )),
                 "carry_to_height" => {
                     let launch = launch(arg("launch"));
@@ -957,9 +1006,10 @@ pub(in crate::corpus) fn replay(
 pub(in crate::corpus) fn strokes(
     case: &Dict,
     course: Option<&Course>,
+    versions: super::models::Versions,
     drift: bool,
-) -> Result<Variant, String> {
-    use golf_sim_base::{trace::Trace, variant};
+) -> Result<crate::tolerance::CaseOutcome, String> {
+    use golf_sim_base::variant;
     use golf_sim_physics::integrator::{self, Options};
 
     let input = dict(field(case, "input"));
@@ -993,7 +1043,8 @@ pub(in crate::corpus) fn strokes(
                     )
                 },
                 drift,
-            ))
+            )
+            .into())
         }
         "shot_integrator.run" => {
             let cup = field(input, "cup").as_dict().map(|d| Cup {
@@ -1016,22 +1067,24 @@ pub(in crate::corpus) fn strokes(
                 &mut NoProbe,
             );
             let output = shot_snapshot(&result);
-            let traced = integrator::run(
-                &launch,
-                &ball,
-                &conditions,
-                &*ground,
-                cup,
-                options,
-                &mut Trace::default(),
-            );
-            assert_eq!(
-                variant::encode(&output).unwrap(),
-                variant::encode(&shot_snapshot(&traced)).unwrap(),
-                "trace changed {}",
-                field(case, "id").as_str().unwrap(),
-            );
-            Ok(output)
+            versions.run(|probe| {
+                let traced =
+                    integrator::run(&launch, &ball, &conditions, &*ground, cup, options, probe);
+                assert_eq!(
+                    variant::encode(&output).unwrap(),
+                    variant::encode(&shot_snapshot(&traced)).unwrap(),
+                    "probe changed {}",
+                    field(case, "id").as_str().unwrap(),
+                );
+                let context = super::trajectory::FlightContext {
+                    ball: &ball,
+                    air: &conditions,
+                    ground: &*ground,
+                    t0: options.time_s,
+                    dt: golf_sim_physics::tunables::FLIGHT_DT * options.step_scale,
+                };
+                Ok(compare_trajectory(case, &result, context, drift))
+            })
         }
         call => Err(format!("unknown integrator call {call:?}")),
     }

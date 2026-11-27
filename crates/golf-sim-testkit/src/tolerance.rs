@@ -843,6 +843,17 @@ pub(crate) struct Departures {
     departure: Vec<Departure>,
     #[serde(default)]
     pub field_departure: Vec<FieldDepartureRule>,
+    #[serde(default)]
+    pub precision_departure: Vec<PrecisionDepartureRule>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PrecisionDepartureRule {
+    pub fixture: String,
+    pub call: String,
+    pub id_sha256: String,
+    pub change: String,
 }
 
 #[derive(Deserialize)]
@@ -889,6 +900,16 @@ pub(crate) enum CaseOutcome {
         actual: Variant,
         departures: Vec<FieldDeparture>,
     },
+    ModelDeparture {
+        actual: Variant,
+        first: crate::corpus::physics::models::AffectedEvent,
+        change: &'static str,
+    },
+    StopTickDeparture {
+        actual: Variant,
+        step_scale: Real,
+        change: String,
+    },
     Refused(String),
     ModifiedCourse {
         course: String,
@@ -903,6 +924,30 @@ impl From<Variant> for CaseOutcome {
             departures: Vec::new(),
         }
     }
+}
+
+fn check_stop_tick(
+    case: &Case<'_>,
+    expected: &Variant,
+    actual: &Variant,
+    step_scale: Real,
+    change: String,
+    limits: &Layer,
+) -> CorpusResult<Departure> {
+    let aligned = crate::corpus::physics::playback::align_stop_tick(expected, actual, step_scale)?;
+    if let Some(difference) =
+        compare_case(case, &aligned.expected, &aligned.actual, limits, false)?.0
+    {
+        return Err(format!(
+            "unaffected output differs after aligning the rest tick: {difference}"
+        )
+        .into());
+    }
+    Ok(Departure {
+        id: case.id().into(),
+        layer: case.layer.into(),
+        change: format!("{change}; {:.9} s tick; {}", aligned.tick, aligned.first),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1102,6 +1147,46 @@ impl Fixture {
             };
             let (actual, departures) = match outcome {
                 CaseOutcome::Compared { actual, departures } => (actual, departures),
+                CaseOutcome::StopTickDeparture {
+                    actual,
+                    step_scale,
+                    change,
+                } => {
+                    let expected = case.expected()?;
+                    match check_stop_tick(&case, &expected, &actual, step_scale, change, &limits) {
+                        Ok(departure) => report.skipped.push(departure),
+                        Err(error) => {
+                            report.checked += 1;
+                            report.failures.push(case.run_error(error));
+                        }
+                    }
+                    continue;
+                }
+                CaseOutcome::ModelDeparture {
+                    actual,
+                    first,
+                    change,
+                } => {
+                    let expected = case.expected()?;
+                    if let Some((expected_prefix, actual_prefix)) =
+                        first.unaffected(&expected).zip(first.unaffected(&actual))
+                    {
+                        let (difference, _) =
+                            compare_case(&case, &expected_prefix, &actual_prefix, &limits, false)?;
+                        if let Some(difference) = difference {
+                            report.checked += 1;
+                            report.failures.push(difference.to_string());
+                        } else {
+                            report.skipped.push(Departure {
+                                id: case.id().into(),
+                                layer: layer.into(),
+                                change: change.into(),
+                            });
+                        }
+                        continue;
+                    }
+                    (actual, Vec::new())
+                }
                 CaseOutcome::Refused(reason) => {
                     report.refused.push(CaseRefusal::other(case.id(), reason));
                     continue;
@@ -1116,16 +1201,19 @@ impl Fixture {
             report.checked += 1;
             report.field_departures.extend(departures);
             let expected = case.expected()?;
-            match compare_case(
+            let (difference, failure) = compare_case(
                 &case,
                 &expected,
                 &actual,
                 &limits,
                 limits.discrete_share > 0.0,
-            )? {
-                (Some(difference), true) => report.failures.push(difference.to_string()),
-                (Some(difference), false) => discrete.push(difference),
-                (None, _) => {}
+            )?;
+            if let Some(difference) = difference {
+                if failure {
+                    report.failures.push(difference.to_string());
+                } else {
+                    discrete.push(difference);
+                }
             }
         }
         for difference in discrete {
@@ -1231,6 +1319,36 @@ impl Fixture {
             let actual = match run(case.fields) {
                 Ok(CaseOutcome::Compared { actual, departures }) => {
                     report.field_departures.extend(departures);
+                    actual
+                }
+                Ok(CaseOutcome::StopTickDeparture {
+                    actual,
+                    step_scale,
+                    change,
+                }) => {
+                    match check_stop_tick(&case, &expected, &actual, step_scale, change, &limits) {
+                        Ok(departure) => report.skipped.push(departure),
+                        Err(error) => report.failures.push(case.run_error(error)),
+                    }
+                    actual
+                }
+                Ok(CaseOutcome::ModelDeparture {
+                    actual,
+                    first,
+                    change,
+                }) => {
+                    if let Some((reference, prefix)) =
+                        first.unaffected(&expected).zip(first.unaffected(&actual))
+                        && compare_case(&case, &reference, &prefix, &limits, false)?
+                            .0
+                            .is_none()
+                    {
+                        report.skipped.push(Departure {
+                            id: case.id().into(),
+                            layer: layer.into(),
+                            change: change.into(),
+                        });
+                    }
                     actual
                 }
                 Ok(CaseOutcome::Refused(reason)) => {

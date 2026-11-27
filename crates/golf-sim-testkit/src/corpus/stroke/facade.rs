@@ -4,7 +4,7 @@ use golf_sim_base::{
     ClubId, Real, Seed, Surface, Vec2, Vec3,
     digest::object,
     fm,
-    trace::NoProbe,
+    trace::{NoProbe, Probe},
     variant::{Array, Components, Dict, FloatWidth, Variant},
 };
 use golf_sim_conditions::{
@@ -319,7 +319,7 @@ fn lie_snapshot(lie: BallLie) -> Variant {
     }
 }
 
-fn replay(case: &Dict, world: &World<'_>) -> Variant {
+fn replay(case: &Dict, world: &World<'_>, probe: &mut impl Probe) -> Variant {
     let args = dict(field(case, "input"));
     let call = field(case, "call").as_str().unwrap();
     match call {
@@ -356,9 +356,7 @@ fn replay(case: &Dict, world: &World<'_>) -> Variant {
                 "stroke.launch" => {
                     launch_snapshot(stroke::launch(&input, execution(), world, &mut NoProbe))
                 }
-                "stroke.play" => {
-                    stroke_snapshot(&stroke::play(&input, execution(), world, &mut NoProbe))
-                }
+                "stroke.play" => stroke_snapshot(&stroke::play(&input, execution(), world, probe)),
                 "stroke.preview" => {
                     let target = vector3(field(args, "target"));
                     let stock = field(args, "stock_address")
@@ -635,6 +633,7 @@ fn check_derived_fields(
     world: &World<'_>,
     actual: &mut Variant,
     drift: bool,
+    model_departure: bool,
 ) -> Result<(), String> {
     let mut checks = DerivedChecks {
         id: field(case, "id").as_str().unwrap(),
@@ -660,20 +659,37 @@ fn check_derived_fields(
         }
         "stroke.play" => {
             let expected_shot = dict(field(expected, "playback"));
-            let mut outcome = std::mem::replace(actual.get_mut("outcome").unwrap(), Variant::Nil);
-            checks.outcome(
-                dict(field(expected, "outcome")),
-                fields_mut(&mut outcome),
-                expected_shot,
-                dict(field(actual, "playback")),
-            );
-            *actual.get_mut("outcome").unwrap() = outcome;
+            if !model_departure {
+                let mut outcome =
+                    std::mem::replace(actual.get_mut("outcome").unwrap(), Variant::Nil);
+                checks.outcome(
+                    dict(field(expected, "outcome")),
+                    fields_mut(&mut outcome),
+                    expected_shot,
+                    dict(field(actual, "playback")),
+                );
+                *actual.get_mut("outcome").unwrap() = outcome;
+            }
+            let args = dict(field(case, "input"));
+            let input = stroke_input(dict(field(args, "input")));
+            let request = impact_request(&input, execution(dict(field(args, "execution"))), true);
             let playback = fields_mut(actual.get_mut("playback").unwrap());
-            checks.launch(
-                dict(field(expected_shot, "launch")),
-                fields_mut(playback.get_mut("launch").unwrap()),
-                false,
-            );
+            crate::corpus::physics::impact::compare_shot_launch(
+                expected_shot,
+                playback,
+                |expected, actual| {
+                    crate::corpus::physics::impact::compare_launch_rounding(
+                        case,
+                        expected,
+                        actual,
+                        &request,
+                        world.ground(),
+                        drift,
+                    )?;
+                    checks.launch(expected, actual, false);
+                    Ok(())
+                },
+            )?;
         }
         "stroke.preview" => {
             let args = dict(field(case, "input"));
@@ -711,9 +727,35 @@ pub(in crate::corpus) fn run(
 ) -> Result<Variant, String> {
     let args = dict(field(case, "input"));
     let world = crate::corpus::world::world(dict(field(args, "world")), course);
-    let mut actual = replay(case, &world);
-    check_derived_fields(case, &world, &mut actual, drift)?;
+    let mut actual = replay(case, &world, &mut NoProbe);
+    check_derived_fields(case, &world, &mut actual, drift, false)?;
     Ok(actual)
+}
+
+pub(in crate::corpus) fn run_with_model(
+    case: &Dict,
+    course: Option<&Course>,
+    drift: bool,
+    versions: crate::corpus::physics::models::Versions,
+) -> Result<crate::tolerance::CaseOutcome, String> {
+    use crate::tolerance::CaseOutcome;
+
+    if field(case, "call").as_str() != Some("stroke.play") {
+        return run(case, course, drift).map(Into::into);
+    }
+    let args = dict(field(case, "input"));
+    let world = crate::corpus::world::world(dict(field(args, "world")), course);
+    let mut outcome = versions.run(|probe| Ok(replay(case, &world, probe)))?;
+    match &mut outcome {
+        CaseOutcome::Compared { actual, .. } => {
+            check_derived_fields(case, &world, actual, drift, false)?;
+        }
+        CaseOutcome::ModelDeparture { actual, .. } => {
+            check_derived_fields(case, &world, actual, drift, true)?;
+        }
+        _ => unreachable!("a replay produces a comparison"),
+    }
+    Ok(outcome)
 }
 
 #[cfg(test)]

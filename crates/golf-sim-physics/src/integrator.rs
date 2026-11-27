@@ -489,7 +489,7 @@ impl Run<'_> {
         }
     }
 
-    fn touch_down(&mut self, probe: &mut impl Probe) {
+    fn touch_down<P: Probe>(&mut self, probe: &mut P) {
         let ground = self.current_ground;
         self.position.y = supported_height(ground, self.ball.radius_m);
         self.next_trace_sample = None;
@@ -512,6 +512,9 @@ impl Run<'_> {
             return;
         }
         let outcome = bounce::impact(self.velocity, self.spin, &ground, self.ball, probe);
+        if P::ENABLED {
+            probe.boundary("terrain_contact_s", self.time);
+        }
         self.velocity = outcome.velocity;
         self.spin = outcome.spin;
         if hop_height(self.velocity.dot(ground.normal), ground.normal) > t::MIN_HOP_HEIGHT_M {
@@ -643,7 +646,7 @@ impl Run<'_> {
         }
     }
 
-    fn ground_obstacle(&mut self, hit: ObstacleHit, probe: &mut impl Probe) {
+    fn ground_obstacle<P: Probe>(&mut self, hit: ObstacleHit, probe: &mut P) {
         // Test the rebound against the surface at the hit, which can differ from the step's start.
         let normal = self.current_ground.normal;
         self.position += hit.normal * t::CONTACT_SLOP_M;
@@ -660,6 +663,9 @@ impl Run<'_> {
         self.motion = Motion::Skid;
         if hit.kind == ObstacleKind::Flagstick {
             self.trace_cup("flagstick_contact_s", probe);
+            if P::ENABLED {
+                probe.boundary("ground_flagstick_s", self.time);
+            }
             if self.crossing_to_stick {
                 self.crossing_to_stick = false;
                 let cup = self.cup.expect("stick crossing requires a cup");
@@ -704,7 +710,7 @@ impl Run<'_> {
         }
     }
 
-    fn putt_entry(&mut self, probe: &mut impl Probe) {
+    fn putt_entry<P: Probe>(&mut self, probe: &mut P) {
         let cup = self.cup.expect("rim crossing requires a cup");
         self.cup_entered = true;
         self.emit(EventKind::CupEntry);
@@ -713,14 +719,18 @@ impl Run<'_> {
         } else {
             UP
         };
-        match cup::putt_entry_on_slope(
+        let entry = cup::putt_entry_on_slope(
             self.position,
             self.velocity,
             cup,
             self.ball.radius_m,
             normal,
             probe,
-        ) {
+        );
+        if P::ENABLED {
+            probe.boundary("cup_entry_s", self.time);
+        }
+        match entry {
             cup::PuttEntry::Capture => self.start_cup_drop(probe),
             cup::PuttEntry::LipOut { velocity } => {
                 self.velocity = velocity;

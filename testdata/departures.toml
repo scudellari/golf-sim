@@ -181,3 +181,15 @@ call = "tunables.VERSION"
 fields = ["$"]
 version = "0.11.0"
 change = "physics 0.11.0: green bounce across the iron range"
+
+[[precision_departure]]
+fixture = "physics/strokes"
+call = "shot_integrator.run"
+id_sha256 = "7ba5461d5ced0e50177df74df552c0a42294b10494302fbe198c5f3ecc1bb775"
+change = "rounding across the final playback tick before the rest event; see round 5 drift-physics-strokes.md"
+
+[[precision_departure]]
+fixture = "physics/facade"
+call = "golf_sim.simulate_launch"
+id_sha256 = "009964900553d6ba924c09f9daec9df517da5b98aefc51fdd27910af670d5004"
+change = "rounding across the final playback tick before the rest event; see round 5 drift-physics-facade-launch.md"

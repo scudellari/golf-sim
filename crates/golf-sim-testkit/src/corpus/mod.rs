@@ -19,13 +19,16 @@ use std::{
 
 use golf_sim_base::{
     corpus,
+    digest::sha256_hex,
     variant::{Dict, Variant},
 };
 
 use golf_sim_conditions::grounds::CourseGround;
 use golf_sim_course::course::Course;
 
-use crate::tolerance::{self, CaseOutcome, CheckReport, Departures, DriftReport, Fixture};
+use crate::tolerance::{
+    self, CaseOutcome, CheckReport, Departures, DriftReport, Fixture, PrecisionDepartureRule,
+};
 
 use self::courses::Courses;
 
@@ -109,6 +112,8 @@ pub struct FixtureRun {
     header: Dict,
     query_checks: course::QueryChecks,
     scratch: Option<generated::WithDepartures>,
+    stroke_models: physics::models::Versions,
+    precision_departures: Vec<PrecisionDepartureRule>,
     tunable_departures: Option<physics::values::TunableDepartures>,
 }
 
@@ -152,6 +157,17 @@ impl FixtureRun {
                 )
             })
             .transpose()?;
+        let stroke_models = physics::models::Versions::for_fixture(&header);
+        let precision_departures =
+            if matches!(runner, Runner::PhysicsStrokes | Runner::PhysicsFacade) {
+                Departures::load(&testdata)?
+                    .precision_departure
+                    .into_iter()
+                    .filter(|rule| rule.fixture == key)
+                    .collect()
+            } else {
+                Vec::new()
+            };
         Ok(Self {
             runner,
             layer: fixture_layer.to_owned(),
@@ -164,6 +180,8 @@ impl FixtureRun {
             query_checks: course::QueryChecks::default(),
             scratch,
             tunable_departures,
+            stroke_models,
+            precision_departures,
         })
     }
 
@@ -359,6 +377,10 @@ impl FixtureRun {
             .filter(|prepared| course.is_some_and(|course| std::ptr::eq(course, prepared.course)));
         let shared_ground = prepared.and_then(|prepared| prepared.ground.as_ref());
 
+        if let Some(rule) = self.precision_rule(case) {
+            return self.run_stop_tick(case, course, rule);
+        }
+
         Ok(match self.runner {
             Runner::Variant => tolerance::variant_snapshot(case)?,
             Runner::CourseGrids => {
@@ -385,11 +407,24 @@ impl FixtureRun {
             Runner::PhysicsFlight => physics::flight::replay(case)?,
             Runner::PhysicsContact => physics::contact::run(case, drift)?,
             Runner::PhysicsImpact => physics::impact::compare(case, course, drift)?,
-            Runner::PhysicsFacade => physics::facade(case, course, drift)?,
-            Runner::PhysicsStrokes => physics::strokes(case, course, drift)?,
+            Runner::PhysicsFacade => {
+                return Ok(self
+                    .stroke_models
+                    .run(|probe| physics::facade(case, course, probe, drift))?);
+            }
+            Runner::PhysicsStrokes => {
+                return Ok(physics::strokes(case, course, self.stroke_models, drift)?);
+            }
             Runner::WorldConstant => world::replay(case, course, shared_ground, drift)?,
             Runner::StrokeDelivery => stroke::delivery::run(case),
-            Runner::StrokeFacade => stroke::facade(case, course, drift)?,
+            Runner::StrokeFacade => {
+                return Ok(stroke::facade_with_model(
+                    case,
+                    course,
+                    drift,
+                    self.stroke_models,
+                )?);
+            }
             Runner::SwingStreams => swing::run(case),
             Runner::RulesTransitions => rules::run(case, drift)?,
             Runner::MathPrims
@@ -403,6 +438,54 @@ impl FixtureRun {
             }
         }
         .into())
+    }
+
+    fn precision_rule(&self, case: &Dict) -> Option<&PrecisionDepartureRule> {
+        let call = case.get("call").and_then(Variant::as_str)?;
+        if !matches!(call, "shot_integrator.run" | "golf_sim.simulate_launch")
+            || self.precision_departures.is_empty()
+        {
+            return None;
+        }
+        let digest = sha256_hex(case.get("id").and_then(Variant::as_str)?.as_bytes());
+        self.precision_departures
+            .iter()
+            .find(|rule| rule.call == call && rule.id_sha256 == digest)
+    }
+
+    fn run_stop_tick(
+        &self,
+        case: &Dict,
+        course: Option<&Course>,
+        rule: &PrecisionDepartureRule,
+    ) -> Result<CaseOutcome> {
+        let (outcome, step_scale) = if self.runner == Runner::PhysicsStrokes {
+            let scale = match child(case, "input").and_then(|input| input.get("step_scale")) {
+                Some(Variant::Float(value)) => value.value(),
+                Some(Variant::Int(value)) => value.value() as f64,
+                _ => return Err("missing integrator step scale".into()),
+            };
+            (
+                physics::strokes(case, course, self.stroke_models, true)?,
+                scale,
+            )
+        } else {
+            (
+                self.stroke_models
+                    .run(|probe| physics::facade(case, course, probe, true))?,
+                1.0,
+            )
+        };
+        let CaseOutcome::Compared { actual, .. } = outcome else {
+            return Err(
+                "precision departure requires a stroke without a changed model response".into(),
+            );
+        };
+        Ok(CaseOutcome::StopTickDeparture {
+            actual,
+            step_scale,
+            change: rule.change.clone(),
+        })
     }
 
     fn unsupported_sampler(&self, case: &Dict) -> Option<String> {
