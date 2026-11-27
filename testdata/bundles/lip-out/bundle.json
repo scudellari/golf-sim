@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "engine": {
+    "release": "0.2.0",
+    "commit": "dev"
+  },
+  "time": 1795749102,
+  "note": "Test course, seed 5, hole 2, stroke 2. The rolling putt lipped out.",
+  "course": {
+    "id": "test-course",
+    "revision": "82b40c2b1d877f0d5a28c48efdd2179e79e4be3ef664b69ec0f7b2e3569072eb"
+  },
+  "focus": {
+    "hole": 2,
+    "stroke": 2
+  },
+  "files": [
+    "record.bin",
+    "traces.json"
+  ],
+  "kind": "hole",
+  "versions": {
+    "commit": "dev",
+    "physics": "0.11.0",
+    "record": "5",
+    "release": "0.2.0",
+    "rules": "0.3.1",
+    "tuning": "0.1.8"
+  }
+}

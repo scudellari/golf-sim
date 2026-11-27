@@ -16,6 +16,7 @@ use std::{
 use clap::{Args, Subcommand, ValueEnum};
 use golf_sim::{
     base::{Seed, log::tracing},
+    bundle::{HoleBundle, stroke_count},
     course::course::Course,
     hole::Hole,
     records::hole::HoleRecord,
@@ -50,6 +51,9 @@ pub struct BatchArgs {
     /// Save a hole record for each play.
     #[arg(long, value_name = "DIR")]
     records: Option<PathBuf>,
+    /// Save repro bundles for failed plays in this directory.
+    #[arg(long, value_name = "DIR", default_value = "repros")]
+    repros: PathBuf,
     #[arg(long, value_enum, default_value = "caddie")]
     mode: InfoMode,
     /// Swing with the requested power, zero timing fault and a centred strike.
@@ -72,6 +76,8 @@ struct Row {
     hole: i64,
     #[serde(flatten)]
     result: PlayResult,
+    #[serde(skip)]
+    diagnostic: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -108,28 +114,21 @@ pub fn run(command: Command) -> Outcome {
         fs::create_dir_all(path)?;
     }
     let play = |seed, hole| {
-        let result = panic::catch_unwind(|| {
-            play_one(&course, seed, hole, mode, hands, args.records.as_deref())
-        });
-        let result = match result {
-            Ok(Ok(Played { score, holed })) => PlayResult::Played {
-                strokes: score.strokes,
-                penalties: score.penalties,
-                holed,
-            },
-            Ok(Err(error)) => PlayResult::Failed { error },
-            Err(payload) => {
-                let message = payload
-                    .downcast_ref::<String>()
-                    .map(String::as_str)
-                    .or_else(|| payload.downcast_ref::<&str>().copied())
-                    .unwrap_or("unknown panic");
-                PlayResult::Failed {
-                    error: format!("play panicked: {message}"),
-                }
-            }
-        };
-        Row { seed, hole, result }
+        let (result, diagnostic) = play_one(
+            &course,
+            seed,
+            hole,
+            mode,
+            hands,
+            args.records.as_deref(),
+            &args.repros,
+        );
+        Row {
+            seed,
+            hole,
+            result,
+            diagnostic,
+        }
     };
     let first = i128::from(*args.seeds.start());
     let count = (i128::from(*args.seeds.end()) - first + 1) * holes.len() as i128;
@@ -167,7 +166,11 @@ pub fn run(command: Command) -> Outcome {
             .zip(0..count)
             .map(|(receive, _)| receive)
         {
-            write_line(&mut output, &receive.recv()?)?;
+            let row = receive.recv()?;
+            if let Some(diagnostic) = &row.diagnostic {
+                eprintln!("{diagnostic}");
+            }
+            write_line(&mut output, &row)?;
         }
         Ok(())
     })?;
@@ -196,22 +199,96 @@ fn play_one(
     mode: Mode,
     hands: Hands,
     records: Option<&Path>,
-) -> Result<Played, String> {
+    repros: &Path,
+) -> (PlayResult, Option<String>) {
     let mut setup = HoleSetup::standard(course, number, Seed(seed));
     setup.settings.info_mode = mode;
     let record = HoleRecord::begin(setup, HoleRecord::agent_driver("golf batch"));
-    let bytes = record.to_bytes().map_err(|error| error.to_string())?;
-    let mut hole = Hole::resume(course.clone(), &bytes).map_err(|error| error.to_string())?;
-    let result = policy::play(&mut hole, mode, hands);
-    if let Some(dir) = records {
-        let path = dir.join(format!("hole-{number}-seed-{seed}.rec"));
-        let bytes = hole
-            .record()
-            .to_bytes()
-            .map_err(|error| error.to_string())?;
-        save_record(&path, &bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut hole = None;
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<Played, String> {
+        let bytes = record.to_bytes().map_err(|error| error.to_string())?;
+        let hole = hole.insert(
+            Hole::resume(course.clone(), &bytes)
+                .map_err(|error| error.to_string())?
+                .with_traces(3),
+        );
+        let result = policy::play(hole, mode, hands);
+        if let Some(dir) = records {
+            let path = dir.join(format!("hole-{number}-seed-{seed}.rec"));
+            let bytes = hole
+                .record()
+                .to_bytes()
+                .map_err(|error| error.to_string())?;
+            save_record(&path, &bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+        }
+        result
+    }));
+    let result = match result {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic");
+            Err(format!("play panicked: {message}"))
+        }
+    };
+    let failure = match &result {
+        Ok(played) if !played.holed => Some("play reached the stroke limit".into()),
+        Err(error) => Some(error.clone()),
+        _ => None,
+    };
+    let diagnostic = failure.map(|note| {
+        let label = format!("batch-hole-{number}-seed-{seed}");
+        let bundle = match hole {
+            Some(hole) => hole.bundle(note, stroke_count(hole.record())),
+            None => HoleBundle::from_record(&record, note, 0),
+        };
+        match bundle
+            .map_err(Into::into)
+            .and_then(|bundle| save_repro(repros, &label, &bundle))
+        {
+            Ok(path) => format!("saved repro {}", path.display()),
+            Err(error) => format!("could not save repro for {label}: {error}"),
+        }
+    });
+    let result = match result {
+        Ok(Played { score, holed }) => PlayResult::Played {
+            strokes: score.strokes,
+            penalties: score.penalties,
+            holed,
+        },
+        Err(error) => PlayResult::Failed { error },
+    };
+    (result, diagnostic)
+}
+
+pub(super) fn save_repro(
+    root: &Path,
+    label: &str,
+    bundle: &HoleBundle,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    fs::create_dir_all(root)?;
+    for index in 0.. {
+        let dir = if index == 0 {
+            root.join(label)
+        } else {
+            root.join(format!("{label}-{index}"))
+        };
+        match fs::create_dir(&dir) {
+            Ok(()) => {
+                if let Err(error) = bundle.write(&dir) {
+                    let _ = fs::remove_dir(&dir);
+                    return Err(error.into());
+                }
+                return Ok(dir);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
     }
-    result
+    unreachable!()
 }
 
 fn save_record(path: &Path, bytes: &[u8]) -> io::Result<()> {

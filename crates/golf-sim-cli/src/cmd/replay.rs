@@ -9,11 +9,12 @@ use golf_sim::{
     action::{Action, ReliefOption, Swing},
     base::{
         Error, Real, Vec2,
-        bundle::{Bundle, BundleCourse},
+        bundle::BundleCourse,
         container::Manifest,
-        trace::NoProbe,
+        trace::{NoProbe, Trace},
         variant::{Dict, Variant},
     },
+    bundle::{EarlierBundle, HoleBundle, ReproBundle},
     course::course::Course,
     hole::Hole,
     records::hole::{DecisionKind, Entry, HoleRecord, Refusal, decode_envelope},
@@ -29,7 +30,7 @@ use crate::protocol::ProfileName;
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Replay a hole record or stroke bundle and report the first difference.
+    /// Replay a record or repro bundle and report the first difference.
     Replay(ReplayArgs),
 }
 
@@ -46,15 +47,15 @@ pub struct ReplayArgs {
 }
 
 #[derive(Args)]
-pub struct BundleArgs {
-    #[arg(value_name = "BUNDLE")]
-    bundle: PathBuf,
+pub struct ExplainArgs {
+    #[arg(value_name = "RECORD_OR_BUNDLE")]
+    pub(super) path: PathBuf,
     /// Course bundle to use. Otherwise searches GOLF_COURSES.
     #[arg(long, value_name = "DIR")]
-    course: Option<PathBuf>,
+    pub(super) course: Option<PathBuf>,
     /// Stroke to replay. A stroke bundle contains only stroke 1.
     #[arg(long, value_name = "N")]
-    stroke: Option<usize>,
+    pub(super) stroke: Option<usize>,
 }
 
 pub fn run(command: Command) -> Outcome {
@@ -62,52 +63,135 @@ pub fn run(command: Command) -> Outcome {
     if !args.path.is_dir() {
         return replay_record(&fs::read(&args.path)?, args.course.as_deref(), args.stroke);
     }
-    let (repro, course) = load(&BundleArgs {
-        bundle: args.path,
-        course: args.course,
-        stroke: args.stroke,
-    })?;
-    repro.replay(&course, &mut NoProbe)?;
-    println!("Stroke 1 replay matched bit for bit.");
-    Ok(())
+    match ReproBundle::read(&args.path)? {
+        ReproBundle::Stroke(bundle) => {
+            let (repro, course) = load_stroke(bundle, args.course.as_deref(), args.stroke)?;
+            repro.replay(&course, &mut NoProbe)?;
+            println!("Stroke 1 replay matched bit for bit.");
+            Ok(())
+        }
+        ReproBundle::Hole(bundle) => {
+            let focus = args.stroke.or_else(|| bundle_focus(&bundle));
+            let (record, course) = load_hole(&bundle, args.course.as_deref())?;
+            replay_hole(record, course, &bundle.record, focus, true)
+        }
+        ReproBundle::Earlier(bundle) => Err(earlier(bundle)),
+    }
 }
 
 pub(super) fn replay_record(bytes: &[u8], course: Option<&Path>, stroke: Option<usize>) -> Outcome {
-    let mut record = HoleRecord::from_bytes(bytes)?;
-    let expected = BundleCourse {
-        id: record.setup.course_id.clone(),
-        revision: record.setup.course_revision.clone(),
-        extra: Default::default(),
-    };
-    let course = find_course(&expected, course, "Hole record")?;
+    let record = HoleRecord::from_bytes(bytes)?;
+    let course = record_course(&record, course)?;
+    replay_hole(record, course, bytes, stroke, false)
+}
+
+fn replay_hole(
+    mut record: HoleRecord,
+    course: Arc<Course>,
+    bytes: &[u8],
+    stroke: Option<usize>,
+    bundle: bool,
+) -> Outcome {
     let prefix;
     let bytes = if let Some(stroke) = stroke {
-        let end = record
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| matches!(entry, Entry::Stroke(_)))
-            .nth(stroke.checked_sub(1).ok_or("stroke numbers start at 1")?)
-            .ok_or_else(|| format!("stroke {stroke} is unavailable in this hole record"))?
-            .0;
+        let end = stroke_index(&record, stroke)?;
         record.entries.truncate(end + 1);
         prefix = record.to_bytes()?;
         &prefix
     } else {
         bytes
     };
-    match Hole::resume(course.clone(), bytes) {
-        Ok(hole) => println!(
+    let done = verify(course, record, bytes)?;
+    if let Some(stroke) = stroke.filter(|_| bundle) {
+        println!("Stroke {stroke} replay matched bit for bit.");
+    } else {
+        println!(
             "All {} entries replayed bit for bit.",
-            hole.record().entries.len()
-        ),
-        Err(Refusal::Invalid(Error::Diverged { entry, path })) => {
-            let values = describe_difference(course, record, bytes, entry, &path);
-            return Err(format!("entry {entry} diverges at {path}{values}").into());
-        }
-        Err(error) => return Err(error.into()),
+            done.record().entries.len()
+        );
     }
     Ok(())
+}
+
+fn verify(
+    course: Arc<Course>,
+    record: HoleRecord,
+    bytes: &[u8],
+) -> Result<Hole, Box<dyn std::error::Error>> {
+    match Hole::resume(course.clone(), bytes) {
+        Ok(hole) => Ok(hole),
+        Err(Refusal::Invalid(Error::Diverged { entry, path })) => {
+            let values = describe_difference(course, record, bytes, entry, &path);
+            Err(format!("entry {entry} diverges at {path}{values}").into())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn stroke_index(record: &HoleRecord, stroke: usize) -> Result<usize, String> {
+    record
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, Entry::Stroke(_)))
+        .nth(stroke.checked_sub(1).ok_or("stroke numbers start at 1")?)
+        .map(|(index, _)| index)
+        .ok_or_else(|| format!("stroke {stroke} is unavailable in this hole record"))
+}
+
+pub(super) fn explain_hole(
+    mut record: HoleRecord,
+    course: Arc<Course>,
+    stroke: usize,
+) -> Result<Trace, Box<dyn std::error::Error>> {
+    let end = stroke_index(&record, stroke)?;
+    record.entries.truncate(end + 1);
+    let bytes = record.to_bytes()?;
+    let after = verify(course.clone(), record.clone(), &bytes)?;
+    let Some(Entry::Stroke(entry)) = record.entries.pop() else {
+        unreachable!()
+    };
+    let before = Hole::resume(course, &record.to_bytes()?)?;
+    let mut trace = Trace::default();
+    before.trace_stroke(&entry.facts, &mut trace)?;
+    golf_sim::bundle::trace_ruling(&after, &mut trace);
+    Ok(trace)
+}
+
+pub(super) fn bundle_focus(bundle: &HoleBundle) -> Option<usize> {
+    Some(bundle.manifest.focus.stroke).filter(|&stroke| stroke != 0)
+}
+
+pub(super) fn earlier(bundle: EarlierBundle) -> Box<dyn std::error::Error> {
+    format!(
+        "bundle from the earlier implementation (note and focus only). Note {:?}, focus {}",
+        bundle.note, bundle.focus
+    )
+    .into()
+}
+
+pub(super) fn load_hole(
+    bundle: &HoleBundle,
+    explicit: Option<&Path>,
+) -> Result<(HoleRecord, Arc<Course>), Box<dyn std::error::Error>> {
+    let record = bundle.hole_record()?;
+    let course = find_course(&bundle.manifest.course, explicit, "Bundle")?;
+    Ok((record, course))
+}
+
+pub(super) fn record_course(
+    record: &HoleRecord,
+    explicit: Option<&Path>,
+) -> Result<Arc<Course>, Box<dyn std::error::Error>> {
+    find_course(
+        &BundleCourse {
+            id: record.setup.course_id.clone(),
+            revision: record.setup.course_revision.clone(),
+            extra: Default::default(),
+        },
+        explicit,
+        "Hole record",
+    )
 }
 
 // Hole::resume identifies the first path. Recompute values only when reporting a failure.
@@ -267,7 +351,7 @@ fn recompute_stroke(
     true
 }
 
-fn recorded_swing(swing: &Dict) -> Option<Swing> {
+pub(super) fn recorded_swing(swing: &Dict) -> Option<Swing> {
     let number = |dict: &Dict, key| match dict.get(key) {
         Some(Variant::Float(value)) => Some(value.value()),
         Some(Variant::Int(value)) => Some(value.value() as Real),
@@ -349,12 +433,13 @@ fn display(value: Option<Variant>) -> String {
     }
 }
 
-pub(super) fn load(
-    args: &BundleArgs,
+pub(super) fn load_stroke(
+    bundle: golf_sim::base::bundle::Bundle,
+    explicit: Option<&Path>,
+    stroke: Option<usize>,
 ) -> Result<(StrokeRepro, Arc<Course>), Box<dyn std::error::Error>> {
-    let bundle = Bundle::read(&args.bundle)?;
     let manifest = bundle.manifest;
-    let course = find_course(&manifest.course, args.course.as_deref(), "Bundle")?;
+    let course = find_course(&manifest.course, explicit, "Bundle")?;
     let repro = StrokeRepro::from_bytes(&bundle.record)?;
     if manifest.course.id != repro.setup.course_id {
         return Err("bundle.json and record.bin name different courses".into());
@@ -369,7 +454,7 @@ pub(super) fn load(
     if manifest.focus.hole != Some(repro.setup.hole) || manifest.focus.stroke != 1 {
         return Err("bundle.json focus must name the hole and stroke 1 from record.bin".into());
     }
-    if let Some(stroke) = args.stroke.filter(|&stroke| stroke != 1) {
+    if let Some(stroke) = stroke.filter(|&stroke| stroke != 1) {
         return Err(
             format!("stroke {stroke} is unavailable. This bundle contains only stroke 1").into(),
         );
@@ -377,13 +462,13 @@ pub(super) fn load(
     Ok((repro, course))
 }
 
-fn find_course(
+pub(super) fn find_course_path(
     expected: &BundleCourse,
     explicit: Option<&Path>,
     source: &str,
-) -> Result<Arc<Course>, Box<dyn std::error::Error>> {
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(dir) = explicit {
-        return open_course(dir, expected, source);
+        return Ok(dir.to_owned());
     }
     let roots = env::var_os("GOLF_COURSES").map_or_else(
         || vec![PathBuf::from("testdata/courses")],
@@ -407,7 +492,7 @@ fn find_course(
                 continue;
             }
             if manifest.course_revision == expected.revision {
-                return open_course(&dir, expected, source);
+                return Ok(dir);
             }
             wrong_revision.get_or_insert((dir, manifest.course_revision));
         }
@@ -420,6 +505,18 @@ fn find_course(
         expected.id
     )
     .into())
+}
+
+fn find_course(
+    expected: &BundleCourse,
+    explicit: Option<&Path>,
+    source: &str,
+) -> Result<Arc<Course>, Box<dyn std::error::Error>> {
+    open_course(
+        &find_course_path(expected, explicit, source)?,
+        expected,
+        source,
+    )
 }
 
 fn open_course(

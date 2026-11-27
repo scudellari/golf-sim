@@ -5,10 +5,16 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use golf_sim::base::{
-    bundle::Bundle,
-    trace::{Phase, Source, Trace},
-    variant::{self, Variant},
+use golf_sim::{
+    GOLF_SIM_COMMIT,
+    base::{
+        ClubId,
+        bundle::Bundle,
+        trace::{Phase, Source, Trace},
+        variant::{self, Variant},
+    },
+    bundle::ReproBundle,
+    records::hole::{Entry, Refusal, decode_envelope},
 };
 use serde_json::{Value, json};
 
@@ -203,6 +209,235 @@ fn unfamiliar_manifest_fields_survive_a_read_and_write() {
         fs::read(destination.0.join("record.bin")).unwrap(),
         fs::read(original.join("record.bin")).unwrap()
     );
+}
+
+#[test]
+fn hole_bundle_replays_its_focus_and_explains_the_lip_out() {
+    let dir = Scratch::new();
+    let path = lip_out_for_build(&dir);
+    let ReproBundle::Hole(bundle) = ReproBundle::read(&path).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    let record = bundle.hole_record().unwrap();
+    assert_eq!(record.setup.seed.0, 5);
+    assert_eq!(record.setup.hole, 2);
+    assert_eq!(bundle.manifest.focus.stroke, 2);
+    assert_eq!(record.entries.len(), 3);
+    let Entry::Stroke(stroke) = &record.entries[1] else {
+        panic!("expected the focus stroke");
+    };
+    assert_eq!(stroke.facts.club_id, ClubId::Putter);
+
+    for (args, stroke) in [(&[][..], 2), (&["--stroke", "3"][..], 3)] {
+        let output = golf().arg("replay").arg(&path).args(args).output().unwrap();
+        assert_eq!(
+            success_text(output),
+            format!("Stroke {stroke} replay matched bit for bit.\n")
+        );
+    }
+    let output = golf()
+        .arg("explain")
+        .arg(&path)
+        .args(["--stroke", "2"])
+        .output()
+        .unwrap();
+    let output = success_text(output);
+    let (account, json) = output.split_once("\n\n").unwrap();
+    assert!(account.contains("The rolling ball lipped out"), "{account}");
+    let trace: Trace = serde_json::from_str(json).unwrap();
+    assert_eq!(trace, bundle.traces[0]);
+}
+
+#[test]
+fn a_hole_bundle_preserves_metadata_and_retained_attachments() {
+    let source = Scratch::new();
+    let destination = Scratch::new();
+    let path = fixture("lip-out");
+    let ReproBundle::Hole(mut bundle) = ReproBundle::read(&path).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    bundle
+        .manifest
+        .extra
+        .insert("future".into(), json!({"settings": [true, 2, "value"]}));
+    bundle
+        .manifest
+        .focus
+        .extra
+        .insert("camera".into(), json!({"distance": 3.5}));
+    bundle
+        .manifest
+        .engine
+        .extra
+        .insert("name".into(), json!("other"));
+    bundle
+        .manifest
+        .course
+        .extra
+        .insert("aliases".into(), json!(["test"]));
+    bundle.manifest.files.push("screenshot.png".into());
+    bundle.log_tail = b"{\"message\":\"retained event\"}\n".to_vec();
+    fs::write(source.0.join("screenshot.png"), b"opaque feedback data").unwrap();
+    bundle.write(&source.0).unwrap();
+
+    let ReproBundle::Hole(read) = ReproBundle::read(&source.0).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    assert_eq!(read.traces, bundle.traces);
+    assert_eq!(read.log_tail, bundle.log_tail);
+    assert_eq!(read.record, bundle.record);
+    read.write(&destination.0).unwrap();
+    for name in ["bundle.json", "record.bin", "traces.json", "log.jsonl"] {
+        assert_eq!(
+            fs::read(source.0.join(name)).unwrap(),
+            fs::read(destination.0.join(name)).unwrap(),
+            "{name}"
+        );
+    }
+    assert!(!destination.0.join("screenshot.png").exists());
+}
+
+#[test]
+fn a_hole_bundle_names_both_physics_versions_on_refusal() {
+    let destination = Scratch::new();
+    let ReproBundle::Hole(mut bundle) = ReproBundle::read(&fixture("lip-out")).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    bundle.manifest.extra.get_mut("versions").unwrap()["physics"] = json!("99.1");
+    let Refusal::IncompatibleVersion {
+        model,
+        recorded,
+        current,
+    } = bundle.hole_record().unwrap_err()
+    else {
+        panic!("expected a typed version refusal");
+    };
+    assert_eq!(model, "physics");
+    assert_eq!(recorded, "99.1");
+    assert_eq!(current, golf_sim::physics::tunables::VERSION);
+    bundle.write(&destination.0).unwrap();
+    let outcome = golf().arg("replay").arg(&destination.0).output().unwrap();
+    assert!(failure_text(outcome).contains(&format!(
+        "physics version 99.1, and this build has {current}"
+    )));
+}
+
+#[test]
+fn an_earlier_bundle_exposes_its_note_and_focus_without_opening_the_record() {
+    let dir = Scratch::new();
+    fs::write(
+        dir.0.join("bundle.json"),
+        serde_json::to_vec(&json!({
+            "engine": "gdscript",
+            "note": "example note",
+            "focus": {"hole": 2, "stroke": 3},
+            "files": ["missing-record.bin"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let outcome = golf().arg("replay").arg(&dir.0).output().unwrap();
+    let text = failure_text(outcome);
+    assert!(text.contains("earlier implementation (note and focus only)"));
+    assert!(text.contains("example note"));
+    assert!(text.contains(r#""stroke":3"#));
+}
+
+#[test]
+fn from_repro_writes_a_runnable_scenario_with_saved_swings() {
+    let dir = Scratch::new();
+    let scenario = dir.0.join("generated.toml");
+    let bundle = lip_out_for_build(&dir);
+    let result = golf()
+        .args(["scenario", "from-repro"])
+        .arg(&bundle)
+        .output()
+        .unwrap();
+    let source = success_text(result);
+    let document: toml::Table = toml::from_str(&source).unwrap();
+    let strokes = document["record"]["entries"].as_array().unwrap();
+    let ReproBundle::Hole(bundle) = ReproBundle::read(&bundle).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    let record = bundle.hole_record().unwrap();
+    for (entry, stroke) in record.entries.iter().zip(strokes) {
+        let Entry::Stroke(entry) = entry else {
+            panic!("expected a stroke");
+        };
+        let Variant::Float(power) = entry.swing.get("power").unwrap() else {
+            panic!("expected exact swing power");
+        };
+        assert_eq!(stroke["swing"]["mode"].as_str(), Some("exact"));
+        assert_eq!(
+            stroke["swing"]["power"].as_float().unwrap().to_bits(),
+            power.value().to_bits()
+        );
+    }
+    fs::write(&scenario, source).unwrap();
+    let result = golf()
+        .current_dir(&dir.0)
+        .args(["scenario", "run"])
+        .arg(scenario)
+        .output()
+        .unwrap();
+    assert!(success_text(result).contains("passed (3 strokes, score 3)"));
+    assert!(!dir.0.join("repros").exists());
+}
+
+#[test]
+fn a_refused_batch_play_saves_its_record_under_the_requested_directory() {
+    let dir = Scratch::new();
+    let repros = dir.0.join("reports");
+    let outcome = golf()
+        .current_dir(&dir.0)
+        .args(["batch", "--course"])
+        .arg(course())
+        .args(["--holes", "99", "--seeds", "5-5", "--repros"])
+        .arg(&repros)
+        .output()
+        .unwrap();
+    let path = repros.join("batch-hole-99-seed-5");
+    assert!(
+        String::from_utf8_lossy(&outcome.stderr)
+            .contains(&format!("saved repro {}", path.display()))
+    );
+    let row: Value = serde_json::from_str(&success_text(outcome)).unwrap();
+    assert!(row["error"].as_str().unwrap().contains("no such tee"));
+    let ReproBundle::Hole(bundle) = ReproBundle::read(&path).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    let record = bundle.hole_record().unwrap();
+    assert_eq!(record.setup.hole, 99);
+    assert_eq!(record.setup.seed.0, 5);
+    assert_eq!(bundle.manifest.focus.stroke, 0);
+    assert!(record.entries.is_empty());
+}
+
+fn lip_out_for_build(dir: &Scratch) -> PathBuf {
+    let path = fixture("lip-out");
+    if GOLF_SIM_COMMIT == "dev" {
+        return path;
+    }
+    // Release builds stamp their commit into the record.
+    let ReproBundle::Hole(mut bundle) = ReproBundle::read(&path).unwrap() else {
+        panic!("expected a hole bundle");
+    };
+    let mut record = decode_envelope(&bundle.record).unwrap();
+    let Some(Variant::Dict(versions)) = record.get_mut("versions") else {
+        panic!("expected record versions");
+    };
+    *versions.get_mut("commit").unwrap() = GOLF_SIM_COMMIT.into();
+    let body = variant::encode(&Variant::Dict(record)).unwrap();
+    bundle.record.truncate(8);
+    bundle
+        .record
+        .extend_from_slice(&u32::try_from(body.len()).unwrap().to_le_bytes());
+    bundle.record.extend_from_slice(&body);
+    bundle.manifest.engine.commit = GOLF_SIM_COMMIT.into();
+    bundle.manifest.extra.get_mut("versions").unwrap()["commit"] = json!(GOLF_SIM_COMMIT);
+    let path = dir.0.join("lip-out");
+    bundle.write(&path).unwrap();
+    path
 }
 
 fn check_number_sources(account: &str, trace: &Trace) {
