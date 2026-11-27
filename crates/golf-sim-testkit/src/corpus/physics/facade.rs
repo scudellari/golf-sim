@@ -817,7 +817,11 @@ fn request(input: &Dict) -> ShotRequest {
     }
 }
 
-pub(in crate::corpus) fn replay(case: &Dict, course: Option<&Course>) -> Variant {
+pub(in crate::corpus) fn replay(
+    case: &Dict,
+    course: Option<&Course>,
+    drift: bool,
+) -> Result<Variant, String> {
     let call = field(case, "call")
         .as_str()
         .unwrap()
@@ -825,7 +829,7 @@ pub(in crate::corpus) fn replay(case: &Dict, course: Option<&Course>) -> Variant
         .unwrap();
     let input = dict(field(case, "input"));
     let arg = |key| dict(field(input, key));
-    match call {
+    Ok(match call {
         "air_density" => sim::air_density(&air_sample(arg("air"))).into(),
         "wind_at_height" => vector(sim::wind_at_height(
             &air_sample(arg("air")),
@@ -855,12 +859,23 @@ pub(in crate::corpus) fn replay(case: &Dict, course: Option<&Course>) -> Variant
             let conditions = conditions(arg("conditions"));
             let ground = ground(arg("ground"), course);
             match call {
-                "strike" => launch_snapshot(sim::strike(
-                    &request(arg("request")),
-                    &conditions,
-                    &*ground,
-                    &mut NoProbe,
-                )),
+                "strike" => {
+                    let request = request(arg("request"));
+                    let mut launch =
+                        launch_snapshot(sim::strike(&request, &conditions, &*ground, &mut NoProbe));
+                    let Variant::Dict(actual) = &mut launch else {
+                        unreachable!()
+                    };
+                    super::impact::compare_launch_rounding(
+                        case,
+                        dict(field(case, "output")),
+                        actual,
+                        &request,
+                        &*ground,
+                        drift,
+                    )?;
+                    launch
+                }
                 "simulate_shot" => shot_snapshot(&sim::simulate_shot(
                     &request(arg("request")),
                     &conditions,
@@ -899,7 +914,7 @@ pub(in crate::corpus) fn replay(case: &Dict, course: Option<&Course>) -> Variant
                 _ => panic!("unknown facade call {call}"),
             }
         }
-    }
+    })
 }
 
 pub(in crate::corpus) fn strokes(case: &Dict, course: Option<&Course>) -> Result<Variant, String> {

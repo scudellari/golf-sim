@@ -1,3 +1,5 @@
+use golf_sim_conditions::grounds::CourseGround;
+use golf_sim_course::course::Course;
 use std::cell::Cell;
 
 use golf_sim_base::{
@@ -10,7 +12,7 @@ use golf_sim_physics::{
     plane::PlaneGround,
     samplers::{AirSample, GroundSample, GroundSampler},
     strike,
-    values::{BallSpec, ClubCategory, ClubSpec, Delivery, Launch, Lie, ShotRequest},
+    values::{BallSpec, ClubCategory, ClubSpec, Contact, Delivery, Launch, Lie, ShotRequest},
 };
 
 pub const EIGHT_SINGLE_PRECISION_STEPS: Real = 8.0 / (1 << 23) as Real;
@@ -185,6 +187,9 @@ struct DivotGround {
 
 impl GroundSampler for DivotGround {
     fn sample_ground(&self, x: Real, z: Real) -> GroundSample {
+        // The reference test sampler takes a Vector3 even when called with scalar x and z.
+        let x = Real::from(x as f32);
+        let z = Real::from(z as f32);
         let inside = x.abs() < 0.03 && z >= -0.05 && z <= self.back;
         GroundSample {
             height_m: if inside { -self.depth } else { 0.0 },
@@ -218,8 +223,7 @@ pub(in crate::corpus) fn unsupported_ground(input: &Dict) -> Option<String> {
     let ground = input.get("ground")?.as_dict()?;
     let kind = ground.get("kind")?.as_str()?;
     match kind {
-        "plane" => None,
-        "course_ground" if input.get("ground_reads").is_some() => None,
+        "plane" | "course_ground" => None,
         "test_sampler" if is_divot_ground(ground) => None,
         _ => Some(format!("unsupported ground sampler {kind:?}")),
     }
@@ -233,9 +237,13 @@ fn is_divot_ground(ground: &Dict) -> bool {
         == Some("DivotGround")
 }
 
-fn with_ground<T>(input: &Dict, run: impl FnOnce(&dyn GroundSampler) -> T) -> T {
+fn with_ground<T>(
+    input: &Dict,
+    course: Option<&Course>,
+    run: impl FnOnce(&dyn GroundSampler) -> T,
+) -> Result<T, String> {
     let ground = dict(field(input, "ground"));
-    match field(ground, "kind").as_str().unwrap() {
+    Ok(match field(ground, "kind").as_str().unwrap() {
         "plane" => {
             let mut plane = PlaneGround::new(
                 ground_sample(dict(field(ground, "base"))),
@@ -250,29 +258,27 @@ fn with_ground<T>(input: &Dict, run: impl FnOnce(&dyn GroundSampler) -> T) -> T 
             }
             run(&plane)
         }
-        "course_ground" => {
+        "course_ground" if let Some(reads) = input.get("ground_reads") => {
             let ground = GroundReads {
-                reads: array(field(input, "ground_reads")),
+                reads: array(reads),
                 index: Cell::new(0),
             };
             let output = run(&ground);
             assert_eq!(ground.index.get(), ground.reads.len());
             output
         }
-        "test_sampler" => {
-            assert_eq!(
-                field(ground, "script")
-                    .as_str()
-                    .unwrap()
-                    .rsplit("::")
-                    .next(),
-                Some("DivotGround"),
-            );
+        "course_ground" => run(&CourseGround::new(
+            course.ok_or("course ground has neither a course identity nor ground reads")?,
+            number(ground, "firmness"),
+            number(ground, "moisture"),
+            number(ground, "green_speed_m"),
+        )),
+        "test_sampler" if is_divot_ground(ground) => {
             let params = dict(field(ground, "parameters"));
             run(&read_fields!(params, DivotGround, depth, back))
         }
-        kind => panic!("unknown ground kind {kind}"),
-    }
+        kind => return Err(format!("unknown ground kind {kind}")),
+    })
 }
 
 pub fn launch_output(launch: Launch) -> Variant {
@@ -310,7 +316,456 @@ pub fn launch_output(launch: Launch) -> Variant {
     }
 }
 
-fn replay(case: &Dict) -> Result<Variant, String> {
+fn round_height(world_y: Real, local_y: Real) -> Real {
+    let base = world_y as f32;
+    Real::from(base + local_y as f32) - Real::from(base)
+}
+
+#[derive(Default)]
+struct StrikeBounds {
+    normal: Real,
+    face_up: Real,
+    velocity: Real,
+    spin: [Real; 3],
+}
+
+fn strike_bounds(
+    request: &ShotRequest,
+    ground: &(impl GroundSampler + ?Sized),
+    launch: &Dict,
+) -> StrikeBounds {
+    use golf_sim_base::Basis;
+    use golf_sim_physics::tunables as t;
+
+    const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+
+    let club = &request.club;
+    let ball = &request.ball;
+    let delivery = &request.delivery;
+    let step = Real::from(f32::EPSILON);
+    let aim = Vec3::new(request.aim.x, 0.0, request.aim.z).normalized();
+    let right = aim.cross(UP);
+    let contact = integer(launch, "contact");
+    if ![
+        Contact::Face,
+        Contact::LeadingEdge,
+        Contact::TopEdge,
+        Contact::SideEdge,
+    ]
+    .into_iter()
+    .any(|kind| contact == kind as usize)
+    {
+        return StrikeBounds::default();
+    }
+    let pre = strike::before_ball(request, aim, right, ground);
+    if pre.sand_fraction * pre.sand_blend > 0.0 {
+        return StrikeBounds::default();
+    }
+    let head = impact::head_orientation(club, delivery, aim, right, pre.face_close_rad);
+    let toe = delivery.strike_toe_m;
+    let up = number(launch, "strike_up_m");
+    let actual_toe = number(launch, "strike_toe_m");
+    let curvature = |radius| if radius > 0.0 { 1.0 / radius } else { 0.0 };
+    let roll = curvature(club.roll_radius_m);
+    let bulge = curvature(club.bulge_radius_m);
+    let face_normal = |height| {
+        (head.normal + head.face_up * (height * roll) + head.toe * (toe * bulge)).normalized()
+    };
+    let offset = |toe, up| {
+        head.face_up * up + head.toe * toe
+            - head.normal * (0.5 * (up * up * roll + toe * toe * bulge))
+    };
+    let center_y = ball.radius_m + request.lie.ball_height_m;
+    let origin_y = request.position.y;
+    let local_scale =
+        center_y.abs() + ball.radius_m + up.abs() + toe.abs() + club.face_center_height_m;
+    let dy = (round_height(origin_y, center_y) - center_y).abs() + 8.0 * step * local_scale;
+    let approach = (aim * fm::cos(delivery.path_rad) + right * fm::sin(delivery.path_rad))
+        * fm::cos(delivery.attack_rad)
+        + UP * fm::sin(delivery.attack_rad);
+
+    let (normal, dn, dup, edge_distance, offset_error) = if contact == Contact::Face as usize {
+        let face_limit = club
+            .face_center_height_m
+            .max((club.face_height_m - club.face_center_height_m).abs());
+        let derivative =
+            head.face_up.y.abs() - roll * (face_limit * head.normal.y.abs() + ball.radius_m);
+        if derivative <= 0.0 {
+            return StrikeBounds::default();
+        }
+        let dup = dy / derivative;
+        if up - dup < -club.face_center_height_m
+            || up + dup > club.face_height_m - club.face_center_height_m
+        {
+            return StrikeBounds::default();
+        }
+        (
+            face_normal(up),
+            roll * dup + EIGHT_SINGLE_PRECISION_STEPS,
+            dup,
+            0.0,
+            dup * (1.0 + roll * (up.abs() + 0.5 * dup)),
+        )
+    } else {
+        // Bound the extended-face tangency before finding the first sphere/edge root.
+        let sole = |h| {
+            center_y - face_normal(h).y * ball.radius_m - offset(toe, h).y
+                + offset(0.0, -club.face_center_height_m).y
+        };
+        let mut tangent_up = 0.0;
+        for _ in 0..6 {
+            let derivative = (sole(tangent_up + 0.0001) - sole(tangent_up - 0.0001)) / 0.0002;
+            if derivative.abs() <= 1e-5 {
+                return StrikeBounds::default();
+            }
+            tangent_up += (pre.sole_height_m - sole(tangent_up)) / derivative;
+        }
+        let derivative = head.face_up.y.abs()
+            - roll * ((tangent_up.abs() + ball.radius_m) * head.normal.y.abs() + ball.radius_m);
+        if derivative <= 0.0 {
+            return StrikeBounds::default();
+        }
+        let dup = (dy + (pre.sole_height_m - sole(tangent_up)).abs()) / derivative;
+        if dup > ball.radius_m {
+            return StrikeBounds::default();
+        }
+        let to_edge = face_normal(tangent_up) * ball.radius_m + offset(toe, tangent_up)
+            - offset(actual_toe, up);
+        let perpendicular = to_edge.slide(approach);
+        let chord2 = ball.radius_m * ball.radius_m - perpendicular.length_squared();
+        let world_error = 1.5 * step * (origin_y.abs() + 2.0 * local_scale + tangent_up.abs());
+        let dperp = world_error + dup * (1.0 + roll * (ball.radius_m + tangent_up.abs() + dup));
+        let dc = dperp * (2.0 * perpendicular.length() + dperp);
+        if chord2 <= dc {
+            return StrikeBounds::default();
+        }
+        let chord = fm::sqrt(chord2);
+        let droot = dc / (chord + fm::sqrt(chord2 - dc));
+        let normal = (perpendicular + approach * chord).normalized();
+        let dn = (dperp + droot + world_error) / ball.radius_m + EIGHT_SINGLE_PRECISION_STEPS;
+        (
+            normal,
+            dn,
+            dup,
+            Vec2::new(toe - actual_toe, tangent_up - up).length(),
+            0.0,
+        )
+    };
+    let face_offset = offset(actual_toe, up);
+    let rc = face_offset + head.forward * club.cg_depth_m
+        - head.up * club.cg_up_m
+        - head.toe * club.cg_toe_m;
+
+    // The contact point, face center and three CG additions are written into vectors.
+    // The point cancels in the arm subtraction, so only the latter four stores enter.
+    let world_scale = origin_y.abs() + local_scale + rc.length();
+    let drc = 2.0 * step * world_scale + offset_error + 8.0 * step * rc.length();
+    let rb = -normal * ball.radius_m;
+    let drb = ball.radius_m * dn;
+    let ib = ball.moment_of_inertia();
+    let inertia = |v: Vec3| {
+        head.forward * (head.forward.dot(v) / club.moi_forward)
+            + head.up * (head.up.dot(v) / club.moi_vertical)
+            + head.toe * (head.toe.dot(v) / club.moi_heel_toe)
+    };
+    let inv_ic = 1.0
+        / club
+            .moi_forward
+            .min(club.moi_vertical)
+            .min(club.moi_heel_toe);
+    let k_min = 1.0 / ball.mass_kg + 1.0 / club.head_mass_kg;
+    let k_norm = k_min + rb.length_squared() / ib + rc.length_squared() * inv_ic;
+    let dk = (2.0 * rb.length() + drb) * drb / ib
+        + (2.0 * rc.length() + drc) * drc * inv_ic
+        + 16.0 * step * k_norm;
+    let response = |v| v * k_min - rb.cross(rb.cross(v)) / ib - rc.cross(inertia(rc.cross(v)));
+    let [x, y, z] = [Vec3::new(1.0, 0.0, 0.0), UP, Vec3::new(0.0, 0.0, 1.0)].map(response);
+    let k = Basis {
+        rows: [
+            Vec3::new(x.x, y.x, z.x),
+            Vec3::new(x.y, y.y, z.y),
+            Vec3::new(x.z, y.z, z.z),
+        ],
+    };
+    let velocity = vec3(launch, "velocity");
+    let incoming = -approach * (pre.club_speed_mps * (1.0 + toe / club.arc_radius_m));
+    let speed = incoming.length();
+    let un = incoming.dot(normal);
+    let dun = speed * (dn + 4.0 * step);
+    let slip = incoming - normal * un;
+    let dslip = dun + (un.abs() + dun) * dn + 4.0 * step * speed;
+    let toe_axis = head.toe.slide(normal).normalized();
+    let up_axis = normal.cross(toe_axis);
+    let dtoe = 2.0 * dn / head.toe.slide(normal).length();
+    let dup_axis = dn + dtoe;
+    let cor_slope = if matches!(club.category, ClubCategory::Driver | ClubCategory::Putter) {
+        0.0
+    } else {
+        t::COR_SPEED_SLOPE + club.cor_speed_slope_delta
+    };
+    let e = if cor_slope == 0.0 {
+        club.cor
+    } else {
+        (club.cor + cor_slope * (t::COR_REFERENCE_SPEED + un)).min(t::COR_LOW_SPEED_MAX)
+    };
+    let contact_cor =
+        1.0 - club.cor_falloff_toe * actual_toe * actual_toe - club.cor_falloff_up * up * up;
+    let edge_cor = 1.0
+        - (1.0 - t::EDGE_COR_FACTOR)
+            * golf_sim_base::num::smoothstep(0.0, t::EDGE_COR_BLEND_M, edge_distance);
+    let restitution = ((e * contact_cor
+        + t::COR_PER_DEGREE_C
+            * (number(launch, "ball_temperature_c") - t::COR_TEMPERATURE_REFERENCE_C))
+        * edge_cor
+        * (1.0 - pre.cushion * t::INTERFERENCE_COR_LOSS))
+        .clamp(0.05, 0.95);
+    let de = (contact_cor.abs() + 1.0) * cor_slope.abs() * dun
+        + if contact == Contact::Face as usize {
+            e.abs() * club.cor_falloff_up.abs() * (2.0 * up.abs() + dup) * dup
+        } else {
+            1.5 * (1.0 - t::EDGE_COR_FACTOR) * dup / t::EDGE_COR_BLEND_M
+        };
+    let keep = 1.0 - pre.interference * t::INTERFERENCE_TANGENTIAL_LOSS;
+    let kt = club.tangential_restitution_toe * keep;
+    let ku = (club.tangential_restitution_up
+        + club.tangential_restitution_speed_slope
+            * (t::COR_REFERENCE_SPEED + un).clamp(0.0, t::TANGENTIAL_SPEED_RANGE_MPS))
+        * keep;
+    let dku = club.tangential_restitution_speed_slope.abs() * dun * keep.abs();
+    let target = normal * (-restitution * un)
+        - toe_axis * (kt * slip.dot(toe_axis))
+        - up_axis * (ku * slip.dot(up_axis));
+    let unconstrained = k.inverse().xform(target - incoming);
+    let impulse_error = (restitution * dun
+        + (un.abs() + dun) * de
+        + restitution * un.abs() * dn
+        + kt.abs() * (2.0 * slip.length() * dtoe + dslip)
+        + ku.abs() * (2.0 * slip.length() * dup_axis + dslip)
+        + dku * (slip.length() + dslip)
+        + dk * unconstrained.length()
+        + 8.0 * step * speed)
+        / k_min;
+    let mu = club.face_friction
+        * (1.0 - pre.interference * t::INTERFERENCE_FRICTION_LOSS)
+        * fm::exp(-t::GRASS_FILM_FRICTION_DECAY * pre.grass_film);
+    let jn = unconstrained.dot(normal);
+    let tangent = unconstrained - normal * jn;
+    let dj_n = impulse_error + unconstrained.length() * dn;
+    let cone_error = impulse_error + (1.0 + mu.abs()) * dj_n + jn.abs() * dn;
+    let cone_margin = mu * jn - tangent.length();
+    let dv = if jn > dj_n && cone_margin > cone_error {
+        impulse_error / ball.mass_kg
+    } else if cone_margin < -cone_error && slip.length() > dslip {
+        let dir = normal - slip.normalized() * mu;
+        let ddir = dn + mu.abs() * 2.0 * dslip / slip.length();
+        let denominator = normal.dot(k.xform(dir));
+        let db = dk * (dir.length() + ddir) + k_norm * (ddir + dn * dir.length());
+        let a = -(1.0 + restitution) * un;
+        let da = (1.0 + restitution) * dun + (un.abs() + dun) * de;
+        if denominator <= db {
+            return StrikeBounds::default();
+        }
+        let quotient = a / denominator;
+        let dq = (da + quotient.abs() * db) / (denominator - db);
+        (dir.length() * dq + (quotient.abs() + dq) * ddir) / ball.mass_kg
+    } else {
+        return StrikeBounds {
+            normal: dn,
+            face_up: dup,
+            ..StrikeBounds::default()
+        };
+    };
+    let factor = (pre.direct_sand_access * pre.grass_transfer).abs();
+    let mut dv = dv * factor + 8.0 * step * velocity.length();
+    if club.category == ClubCategory::Driver {
+        // Clamping the velocity to the smash-limit ball is a nonexpansive projection.
+        dv += 4.0 * step * velocity.length();
+    }
+    // Spin is r_ball × (m * velocity) / inertia, including the same final scaling as velocity.
+    let spin = [normal.y, normal.z, normal.x]
+        .into_iter()
+        .zip([normal.z, normal.x, normal.y])
+        .zip([
+            (velocity.y, velocity.z),
+            (velocity.z, velocity.x),
+            (velocity.x, velocity.y),
+        ])
+        .map(|((a, b), (v, w))| {
+            let component = (a.abs() + b.abs()) * dv
+                + dn * (v.abs() + w.abs() + 2.0 * dv)
+                + 8.0 * step * ((a * w).abs() + (b * v).abs());
+            component / (ball.radius_m * ball.inertia_factor)
+        })
+        .collect::<Vec<_>>();
+    StrikeBounds {
+        normal: dn,
+        face_up: dup,
+        velocity: dv,
+        spin: [spin[0], spin[1], spin[2]],
+    }
+}
+
+fn check_strike_fields(expected: &Dict, actual: &Dict) -> Result<(), String> {
+    if expected.get("contact") != actual.get("contact") {
+        return Err("contact kind differs".into());
+    }
+    for key in [
+        "velocity",
+        "spin",
+        "ball_speed_mps",
+        "launch_angle_rad",
+        "launch_direction_rad",
+        "spin_rate_rad_s",
+        "spin_axis_rad",
+        "smash_factor",
+        "face_angle_rad",
+        "dynamic_loft_rad",
+        "face_to_path_rad",
+        "spin_loft_rad",
+        "strike_toe_m",
+        "strike_up_m",
+    ] {
+        let Some(value) = actual.get(key) else {
+            continue;
+        };
+        let finite = match value {
+            Variant::Vector3(v) => v.values.iter().all(|n| n.is_finite()),
+            Variant::Float(f) => f.value().is_finite(),
+            _ => false,
+        };
+        if !finite {
+            return Err(format!("core {key} is not finite"));
+        }
+    }
+    Ok(())
+}
+
+fn exceeds_strike_row(a: Real, b: Real, scale: Real) -> bool {
+    (a - b).abs()
+        > 1e-6_f64
+            .max(1e-5 * a.abs().max(b.abs()))
+            .max(EIGHT_SINGLE_PRECISION_STEPS * scale)
+}
+
+pub(in crate::corpus) fn compare_launch_rounding(
+    case: &Dict,
+    expected: &Dict,
+    actual: &mut Dict,
+    request: &ShotRequest,
+    ground: &(impl GroundSampler + ?Sized),
+    drift: bool,
+) -> Result<(), String> {
+    check_strike_fields(expected, actual)?;
+    let id = field(case, "id").as_str().unwrap();
+    let needs_bound = actual.entries().iter().any(|(key, value)| {
+        let Some(reference) = key.as_str().and_then(|key| expected.get(key)) else {
+            return false;
+        };
+        match (value, reference) {
+            (Variant::Vector3(a), Variant::Vector3(b))
+                if key.as_str() == Some("spin") || key.as_str() == Some("velocity") =>
+            {
+                let scale = b.values.into_iter().map(Real::abs).fold(1.0, Real::max);
+                a.values
+                    .into_iter()
+                    .zip(b.values)
+                    .any(|(a, b)| exceeds_strike_row(a, b, scale))
+            }
+            (Variant::Float(a), Variant::Float(b)) => exceeds_strike_row(a.value(), b.value(), 1.0),
+            _ => false,
+        }
+    });
+    if !needs_bound {
+        return Ok(());
+    }
+    let bounds = strike_bounds(request, ground, actual);
+    let velocity = vec3(actual, "velocity");
+    let spin = vec3(actual, "spin");
+    let spin_bound = Vec3::new(bounds.spin[0], bounds.spin[1], bounds.spin[2]).length();
+    let direction = |radius: Real, length: Real| {
+        if radius < length {
+            fm::asin(radius / length)
+        } else {
+            0.0
+        }
+    };
+    let heading = direction(bounds.velocity, Vec2::new(velocity.x, velocity.z).length());
+    let loft = direction(bounds.velocity, velocity.length());
+    let face = direction(
+        bounds.normal,
+        fm::cos(number(actual, "dynamic_loft_rad")).abs(),
+    );
+    let spin_axis = direction(spin_bound, spin.length());
+    let contact_normal = direction(bounds.normal, 1.0);
+    let spin_loft = spin_loft_rounding_bound(number(actual, "spin_loft_rad")) + contact_normal;
+    for (key, bound) in [
+        ("ball_speed_mps", bounds.velocity),
+        ("launch_angle_rad", loft),
+        ("launch_direction_rad", heading),
+        ("spin_rate_rad_s", spin_bound),
+        ("spin_axis_rad", spin_axis),
+        (
+            "smash_factor",
+            bounds.velocity / request.delivery.club_speed_mps.max(1.0),
+        ),
+        ("face_angle_rad", face),
+        ("dynamic_loft_rad", contact_normal),
+        ("face_to_path_rad", face),
+        ("spin_loft_rad", spin_loft),
+        ("strike_up_m", bounds.face_up),
+        ("velocity", bounds.velocity),
+        ("spin", spin_bound),
+    ] {
+        let (Some(reference), Some(computed)) = (expected.get(key), actual.get_mut(key)) else {
+            continue;
+        };
+        let accept = |reference: Real, computed: Real, scale: Real, bound: Real| {
+            let difference = (reference - computed).abs();
+            let error = if key == "spin_axis_rad" {
+                difference.min((std::f64::consts::TAU - difference).abs())
+            } else {
+                difference
+            };
+            let ordinary = 1e-6_f64
+                .max(1e-5 * reference.abs().max(computed.abs()))
+                .max(EIGHT_SINGLE_PRECISION_STEPS * scale.max(1.0));
+            if difference > ordinary && (error <= ordinary || (bound.is_finite() && error <= bound))
+            {
+                println!(
+                    "case {id} {key}: {error:.3e} within {:.3e} from contact operand rounding",
+                    ordinary.max(bound)
+                );
+                !drift
+            } else {
+                false
+            }
+        };
+        match (reference, computed) {
+            (Variant::Vector3(reference), Variant::Vector3(computed)) => {
+                let scale = reference
+                    .values
+                    .into_iter()
+                    .map(Real::abs)
+                    .fold(1.0, Real::max);
+                for i in 0..3 {
+                    let bound = if key == "spin" { bounds.spin[i] } else { bound };
+                    if accept(reference.values[i], computed.values[i], scale, bound) {
+                        computed.values[i] = reference.values[i];
+                    }
+                }
+            }
+            (Variant::Float(reference), Variant::Float(computed))
+                if accept(reference.value(), computed.value(), 1.0, bound) =>
+            {
+                *computed = *reference;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn replay(case: &Dict, course: Option<&Course>, drift: bool) -> Result<Variant, String> {
     let call = field(case, "call").as_str().unwrap();
     let input = dict(field(case, "input"));
     let sub = |key| dict(field(input, key));
@@ -350,9 +805,9 @@ fn replay(case: &Dict) -> Result<Variant, String> {
                 lie(sub("lie")),
             );
             request.position = vec3(input, "ground_point");
-            let pre = with_ground(input, |ground| {
+            let pre = with_ground(input, course, |ground| {
                 strike::before_ball(&request, vec3(input, "f"), vec3(input, "s"), ground)
-            });
+            })?;
             record! {
                 club_speed_mps: pre.club_speed_mps,
                 face_close_rad: pre.face_close_rad,
@@ -393,47 +848,165 @@ fn replay(case: &Dict) -> Result<Variant, String> {
                 temperature_c: number(sub("air"), "temperature_c"),
                 ..AirSample::default()
             };
-            launch_output(with_ground(input, |ground| {
-                impact::strike(&request, &air, ground, &mut NoProbe)
-            }))
+            with_ground(input, course, |ground| {
+                let mut output =
+                    launch_output(impact::strike(&request, &air, ground, &mut NoProbe));
+                let Variant::Dict(actual) = &mut output else {
+                    unreachable!()
+                };
+                if input.get("ground_reads").is_some() {
+                    check_strike_fields(dict(field(case, "output")), actual)?;
+                } else {
+                    compare_launch_rounding(
+                        case,
+                        dict(field(case, "output")),
+                        actual,
+                        &request,
+                        ground,
+                        drift,
+                    )?;
+                }
+                Ok::<_, String>(output)
+            })??
         }
         _ => return Err(format!("unknown impact call {call}")),
     };
     Ok(result)
 }
 
-// In these cases acos amplifies the rounding of a dot product close to 1.
 pub const SPIN_LOFT_CASES: [&str; 3] = [
     "suite/test_contact/test_difficult_lie_launches_change_smoothly/001343",
     "suite/test_contact/test_difficult_lie_launches_change_smoothly/001423",
     "suite/test_contact/test_difficult_lie_launches_change_smoothly/001427",
 ];
 
-pub(in crate::corpus) fn compare(case: &Dict, drift_report: bool) -> Result<Variant, String> {
-    let mut actual = replay(case)?;
-    let id = field(case, "id").as_str().unwrap();
-    if SPIN_LOFT_CASES.contains(&id) {
+fn spin_loft_rounding_bound(angle: Real) -> Real {
+    let dot = fm::cos(angle);
+    let lower = fm::acos((dot + EIGHT_SINGLE_PRECISION_STEPS).min(1.0));
+    let upper = fm::acos((dot - EIGHT_SINGLE_PRECISION_STEPS).max(-1.0));
+    (angle - lower).max(upper - angle)
+}
+
+pub(in crate::corpus) fn compare(
+    case: &Dict,
+    course: Option<&Course>,
+    drift_report: bool,
+) -> Result<Variant, String> {
+    let mut actual = replay(case, course, drift_report)?;
+    if field(case, "call").as_str() == Some("club_impact.strike") {
         let key = "spin_loft_rad";
         let expected = dict(field(case, "output"));
         let Variant::Dict(actual_fields) = &mut actual else {
-            return Err(format!("{id}: expected launch output"));
+            return Err("expected launch output".into());
         };
-        let angle = number(expected, key);
-        let drift = (number(actual_fields, key) - angle).abs();
-        let d = EIGHT_SINGLE_PRECISION_STEPS;
-        let bound = (d / fm::sin(angle).abs()).max(fm::sqrt(2.0 * d));
-        let steps = drift / (d / 8.0 * angle.abs().max(1.0));
-        let detail = format!(
-            "case {id} {key}: {drift:.3e} rad ({steps:.2} steps), acos bound {bound:.3e} rad"
-        );
-        if !drift_report && (!drift.is_finite() || drift > bound) {
-            return Err(detail);
-        }
-        println!("{detail}");
-        // The shared checker still compares every other field against the physics row.
-        if !drift_report {
-            *actual_fields.get_mut(key).unwrap() = field(expected, key).clone();
+        let angle = number(actual_fields, key);
+        let recorded = number(expected, key);
+        let drift = (recorded - angle).abs();
+        let normal = 1e-6_f64.max(1e-5 * recorded.abs().max(angle.abs()));
+        let bound = spin_loft_rounding_bound(angle);
+        if (normal..=bound).contains(&drift) {
+            let id = field(case, "id").as_str().unwrap();
+            println!(
+                "case {id} {key}: {drift:.3e} rad from acos of the rounded direction dot product (bound {bound:.3e} rad)"
+            );
+            if !drift_report {
+                *actual_fields.get_mut(key).unwrap() = field(expected, key).clone();
+            }
         }
     }
     Ok(actual)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_reference_divot_sampler_rounds_plan_coordinates_before_the_edge_test() {
+        let back = 0.0625;
+        let ground = DivotGround { depth: 0.01, back };
+        assert_eq!(ground.sample_ground(0.0, back - 1e-7).height_m, -0.01);
+        assert_eq!(ground.sample_ground(0.0, back + 1e-9).height_m, -0.01);
+        assert_eq!(ground.sample_ground(0.0, back + 1e-7).height_m, 0.0);
+    }
+
+    #[test]
+    fn a_nonfinite_spin_or_wrong_contact_cannot_use_the_rounding_bound() {
+        let launch = Launch::default();
+        let expected = launch_output(launch);
+        let actual = launch_output(Launch {
+            spin: Vec3::new(0.0, Real::INFINITY, 0.0),
+            ..launch
+        });
+        assert_eq!(
+            check_strike_fields(dict(&expected), dict(&actual)).unwrap_err(),
+            "core spin is not finite"
+        );
+        let actual = launch_output(Launch {
+            contact: Contact::TopEdge,
+            ..launch
+        });
+        assert_eq!(
+            check_strike_fields(dict(&expected), dict(&actual)).unwrap_err(),
+            "contact kind differs"
+        );
+    }
+
+    #[test]
+    fn contact_height_limits_the_core_strike_up_error() {
+        use golf_sim_base::{ClubId, digest::object};
+        use golf_sim_physics::tunables::{standard_ball, standard_club};
+        let club = standard_club(ClubId::Iron7);
+        let ball = standard_ball();
+        let lie = Lie {
+            ball_height_m: 0.004,
+            ..Lie::default()
+        };
+        let mut delivery = Delivery {
+            club_speed_mps: 30.0,
+            dynamic_loft_rad: 0.38,
+            ..Delivery::default()
+        };
+        delivery.sole_height_m = impact::sole_height_for_strike(&club, &ball, &delivery, &lie, 0.0);
+        let mut request = ShotRequest::new(club, ball, delivery, lie);
+        request.position = Vec3::new(0.0, 256.0, 0.0);
+        request.aim = Vec3::new(0.0, 0.0, -1.0);
+        let ground = PlaneGround::new(GroundSample::default(), request.position);
+        let launch = impact::strike(&request, &AirSample::default(), &ground, &mut NoProbe);
+        assert_eq!(launch.contact, Contact::Face);
+        let output = launch_output(launch);
+        let actual = dict(&output);
+        let radius = strike_bounds(&request, &ground, actual).face_up;
+        assert!(radius > 2e-6);
+        let case = object([("id", "synthetic-strike".into())]);
+        let checked_up = |delta| {
+            let mut reference = actual.clone();
+            *reference.get_mut("strike_up_m").unwrap() = Variant::from(launch.strike_up_m + delta);
+            let mut computed = actual.clone();
+            compare_launch_rounding(
+                dict(&case),
+                &reference,
+                &mut computed,
+                &request,
+                &ground,
+                false,
+            )
+            .unwrap();
+            number(&computed, "strike_up_m")
+        };
+        assert_eq!(
+            checked_up(0.75 * radius),
+            launch.strike_up_m + 0.75 * radius
+        );
+        assert_eq!(checked_up(2.0 * radius), launch.strike_up_m);
+    }
+
+    #[test]
+    fn spin_loft_bound_tightens_away_from_parallel_directions() {
+        let dot = 1.0 - EIGHT_SINGLE_PRECISION_STEPS * 0.5;
+        let drift = fm::acos(dot);
+        assert!(drift > 1e-6);
+        assert!(drift <= spin_loft_rounding_bound(0.0));
+        assert!(spin_loft_rounding_bound(std::f64::consts::FRAC_PI_2) < drift);
+    }
 }
