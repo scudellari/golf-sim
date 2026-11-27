@@ -3,7 +3,10 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use golf_sim_base::{
@@ -19,19 +22,22 @@ fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn golf_binary() -> PathBuf {
-    let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("corpus-cli");
-    let output = Command::new(env!("CARGO"))
-        .current_dir(workspace())
-        .args(["build", "--offline", "-p", "golf-sim-cli", "--bin", "golf"])
-        .arg("--target-dir")
-        .arg(&target)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{}", text(&output.stderr));
-    target
-        .join("debug")
-        .join(format!("golf{}", std::env::consts::EXE_SUFFIX))
+fn golf_binary() -> &'static Path {
+    static BINARY: OnceLock<PathBuf> = OnceLock::new();
+    BINARY.get_or_init(|| {
+        let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("corpus-cli");
+        let output = Command::new(env!("CARGO"))
+            .current_dir(workspace())
+            .args(["build", "--offline", "-p", "golf-sim-cli", "--bin", "golf"])
+            .arg("--target-dir")
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        target
+            .join("debug")
+            .join(format!("golf{}", std::env::consts::EXE_SUFFIX))
+    })
 }
 
 fn text(bytes: &[u8]) -> &str {
@@ -44,7 +50,7 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
     let work = TempDir::new();
     let fixture = workspace().join("testdata/variant/digests/fixture.bin");
     let invoke = |action: &str, path: &Path, layer: Option<&str>| {
-        let mut command = Command::new(&golf);
+        let mut command = Command::new(golf);
         command
             .current_dir(&work.0)
             .args(["corpus", action])
@@ -171,7 +177,7 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
     let cwd = work.0.join("other-working-directory");
     fs::create_dir(&cwd).unwrap();
     fails(
-        Command::new(&golf)
+        Command::new(golf)
             .current_dir(cwd)
             .args(["corpus", "check"])
             .arg(nested)
@@ -183,7 +189,7 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
 
     fails(
         invoke("check", &fixture, Some("unknown")),
-        "golf: unknown corpus layer \"unknown\"\n",
+        "golf: fixture key \"variant/digests\" belongs to layer \"variant\", requested \"unknown\"\n",
     );
 
     let limits = |abs, rel| {
@@ -234,6 +240,165 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
         "{drift}"
     );
     print!("{drift}");
+}
+
+#[test]
+fn golf_checks_and_reports_drift_for_every_phase_one_fixture() {
+    let root = workspace().join("testdata");
+    let golf = golf_binary();
+    for layer in ["course", "physics", "world", "stroke"] {
+        let mut fixtures: Vec<_> = fs::read_dir(root.join(layer))
+            .unwrap()
+            .map(|entry| entry.unwrap().path().join("fixture.bin"))
+            .filter(|path| path.is_file())
+            .collect();
+        assert!(!fixtures.is_empty(), "{layer}");
+        fixtures.sort();
+
+        for path in fixtures {
+            let invoke = |action: &str, explicit_layer: bool| {
+                let mut command = Command::new(golf);
+                command.args(["corpus", action]).arg(&path);
+                if explicit_layer {
+                    command.args(["--layer", layer]);
+                }
+                let output = command.output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{action} {}: {}",
+                    path.display(),
+                    text(&output.stderr)
+                );
+                String::from_utf8(output.stdout).unwrap()
+            };
+            let check = invoke("check", false);
+            let drift = invoke("drift", true);
+            let checked = check.lines().last().unwrap();
+            let checked_count: usize = checked
+                .strip_prefix("checked ")
+                .unwrap()
+                .split(' ')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert!(checked_count > 0, "{}", path.display());
+            let skipped = |report: &str| {
+                report
+                    .lines()
+                    .filter(|line| line.starts_with("skipped case "))
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            let envelope = corpus::read(&path).unwrap();
+            let Some(Variant::Array(cases)) = envelope.as_dict().unwrap().get("cases") else {
+                panic!("expected fixture cases");
+            };
+            let skips = skipped(&check);
+            assert_eq!(checked_count + skips.len(), cases.items.len());
+            assert_eq!(skips, skipped(&drift));
+            let numeric_fields = drift
+                .lines()
+                .filter(|line| line.contains(": max abs "))
+                .count();
+            assert!(numeric_fields > 0, "{}", path.display());
+            println!(
+                "{}: {checked}, {} skipped, drift reported {numeric_fields} numeric fields",
+                path.strip_prefix(&root).unwrap().display(),
+                skips.len(),
+            );
+        }
+    }
+
+    let work = TempDir::new();
+    let path = work.0.join("unknown.bin");
+    write_fixture(&path, &fixture("physics/unregistered", Vec::new()));
+    for action in ["check", "drift"] {
+        let output = Command::new(golf)
+            .args(["corpus", action])
+            .arg(&path)
+            .args(["--layer", "physics"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            text(&output.stderr),
+            "golf: no corpus runner for fixture key \"physics/unregistered\"\n",
+        );
+        print!("{action}: {}", text(&output.stderr));
+    }
+}
+
+#[test]
+fn golf_resolves_course_id_and_revision_from_explicit_directories() {
+    let root = workspace().join("testdata");
+    let work = TempDir::new();
+    let parent = work.0.join("courses");
+    let bundle = parent.join("renamed");
+    fs::create_dir_all(&bundle).unwrap();
+    for name in ["manifest.json", "course.payload"] {
+        fs::copy(
+            root.join("courses/test-course").join(name),
+            bundle.join(name),
+        )
+        .unwrap();
+    }
+    let Variant::Dict(mut header) = corpus::read(&root.join("course/grids/fixture.bin")).unwrap()
+    else {
+        panic!("expected fixture header");
+    };
+    let Some(Variant::Array(cases)) = header.get_mut("cases") else {
+        panic!("expected fixture cases");
+    };
+    cases.items.truncate(1);
+    let path = work.0.join("a-course.bin");
+    write_fixture(&path, &Variant::Dict(header.clone()));
+
+    let golf = golf_binary();
+    for (action, dir) in [("check", &parent), ("drift", &bundle)] {
+        let output = Command::new(golf)
+            .current_dir(&work.0)
+            .args(["corpus", action])
+            .arg(&path)
+            .arg("--course-dir")
+            .arg(work.0.join("missing"))
+            .arg("--course-dir")
+            .arg(dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert!(text(&output.stdout).contains(if action == "check" {
+            "checked 1 case"
+        } else {
+            "max abs "
+        }));
+    }
+
+    let Some(Variant::Dict(oracle)) = header.get_mut("oracle") else {
+        panic!("expected oracle header");
+    };
+    let Some(Variant::Dict(course)) = oracle.get_mut("course") else {
+        panic!("expected course identity");
+    };
+    *course.get_mut("revision").unwrap() = "missing-revision".into();
+    write_fixture(&path, &Variant::Dict(header));
+    for action in ["check", "drift"] {
+        let output = Command::new(golf)
+            .current_dir(&work.0)
+            .args(["corpus", action])
+            .arg(&path)
+            .arg("--course-dir")
+            .arg(&parent)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let error = text(&output.stderr);
+        assert!(
+            error.contains("course \"test-course\" revision \"missing-revision\" was not found"),
+            "{error}"
+        );
+        print!("{action}: {error}");
+    }
 }
 
 #[test]

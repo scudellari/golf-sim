@@ -1,18 +1,9 @@
 use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
-use golf_sim_testkit::tolerance::{self, Fixture, Runner};
+use golf_sim_testkit::corpus::FixtureRun;
 
 use super::Outcome;
-
-const RUNNERS: &[(&str, Runner)] = &[("variant", tolerance::variant_snapshot)];
-
-fn runner(layer: &str) -> Result<Runner, Box<dyn std::error::Error>> {
-    RUNNERS
-        .iter()
-        .find_map(|(name, run)| (*name == layer).then_some(*run))
-        .ok_or_else(|| format!("unknown corpus layer {layer:?}").into())
-}
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -32,27 +23,45 @@ enum Action {
     Check {
         fixture: PathBuf,
         #[arg(long)]
-        layer: String,
+        layer: Option<String>,
+        /// Course bundle directory or parent of course bundles. May be repeated.
+        #[arg(long)]
+        course_dir: Vec<PathBuf>,
     },
     /// Report numeric drift and discrete differences in a fixture.
     Drift {
         fixture: PathBuf,
         #[arg(long)]
         layer: Option<String>,
+        /// Course bundle directory or parent of course bundles. May be repeated.
+        #[arg(long)]
+        course_dir: Vec<PathBuf>,
     },
 }
 
 pub fn run(command: Command) -> Outcome {
     match command {
         Command::Corpus(args) => match args.action {
-            Action::Check { fixture, layer } => {
-                print!("{}", tolerance::check(&fixture, &layer, runner(&layer)?)?);
+            Action::Check {
+                fixture,
+                layer,
+                course_dir,
+            } => {
+                print!(
+                    "{}",
+                    FixtureRun::read(&fixture, layer.as_deref(), &course_dir)?.check()?
+                );
                 Ok(())
             }
-            Action::Drift { fixture, layer } => {
-                let fixture = Fixture::read(&fixture)?;
-                let layer = layer.as_deref().unwrap_or_else(|| fixture.layer());
-                print!("{}", fixture.drift(layer, runner(layer)?)?);
+            Action::Drift {
+                fixture,
+                layer,
+                course_dir,
+            } => {
+                print!(
+                    "{}",
+                    FixtureRun::read(&fixture, layer.as_deref(), &course_dir)?.drift()?
+                );
                 Ok(())
             }
         },

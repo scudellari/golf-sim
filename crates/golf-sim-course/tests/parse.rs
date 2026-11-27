@@ -5,13 +5,13 @@ use std::{
 };
 
 use golf_sim_base::{
-    Error, Vec2, Vec3,
+    Error, Vec2,
     container::{self, Manifest},
-    digest::{object, sha256_hex},
-    variant::{self, Components, Dict, FloatWidth, Variant},
+    digest::sha256_hex,
+    variant::{self, Dict, Variant},
 };
 use golf_sim_course::course::{Course, SurfaceId};
-use golf_sim_testkit::tolerance;
+use golf_sim_testkit::corpus;
 
 fn testdata() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata")
@@ -23,72 +23,16 @@ fn bundle_dir() -> PathBuf {
 
 #[test]
 fn course_grids_match_reference_probes() {
-    let course = Course::open(&bundle_dir()).unwrap();
-    let report = tolerance::check(
-        &testdata().join("course/grids/fixture.bin"),
-        "course",
-        |case| run_probe(&course, case),
-    )
-    .unwrap_or_else(|error| panic!("{error}"));
+    let path = testdata().join("course/grids/fixture.bin");
+    let report = corpus::FixtureRun::read(&path, None, &[])
+        .unwrap()
+        .check()
+        .unwrap();
     assert_eq!(report.checked, 5_000);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
     print!("{report}");
     println!("material ids, kinds and indices matched exactly");
-}
-
-fn run_probe(course: &Course, case: &Dict) -> Result<Variant, String> {
-    let call = case.get("call").and_then(Variant::as_str).unwrap();
-    let input = case.get("input").and_then(Variant::as_dict).unwrap();
-    let position = || {
-        let Some(Variant::Vector3(position)) = input.get("position") else {
-            panic!("{call}: expected a Vector3 position");
-        };
-        let [x, y, z] = position.values;
-        Vec3::new(x, y, z)
-    };
-    let plan = || {
-        let Some(Variant::Vector2(plan)) = input.get("p") else {
-            panic!("{call}: expected a Vector2 plan point");
-        };
-        let [x, z] = plan.values;
-        Vec2::new(x, z)
-    };
-
-    Ok(match call {
-        "height_at" => course.height_at(position()).into(),
-        "ground_split_at" => {
-            let s = course.ground_split_at(plan());
-            Variant::Vector4(Components {
-                values: [s.datum_m, s.offset_m, s.slope.x, s.slope.y],
-                width: FloatWidth::Double,
-            })
-        }
-        "normal_at" => {
-            let normal = course.normal_at(position());
-            Variant::Vector3(Components {
-                values: [normal.x, normal.y, normal.z],
-                width: FloatWidth::Double,
-            })
-        }
-        "material_at" => course
-            .material_at(position())
-            .map_or(Variant::Nil, |material| {
-                object([
-                    ("id", material.id.as_str().into()),
-                    ("kind", (material.kind as i64).into()),
-                    ("grass_height_m", material.grass_height_m.into()),
-                    ("grass", material.grass.as_str().into()),
-                    ("soil", material.soil.as_str().into()),
-                    ("drainage", material.drainage.as_str().into()),
-                ])
-            }),
-        "material_index_at" => course
-            .material_index_at(plan())
-            .map_or(-1, |index| i64::from(index.0))
-            .into(),
-        _ => return Err(format!("unknown probe {call:?}")),
-    })
 }
 
 #[test]
