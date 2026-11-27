@@ -15,7 +15,7 @@ use serde::Deserialize;
 use super::Outcome;
 use crate::{
     protocol::ProfileName,
-    report::{Play, Report},
+    report::{Play, PlayError, Report},
 };
 
 #[derive(Subcommand)]
@@ -104,6 +104,7 @@ pub fn run(command: Command) -> Outcome {
 
     let scratch = Scratch::create()?;
     let mut plays = Vec::new();
+    let mut errors = Vec::new();
     for (index, day) in days.iter().enumerate() {
         for profile in &profiles {
             let name = profile.get_name();
@@ -139,32 +140,22 @@ pub fn run(command: Command) -> Outcome {
             for row in serde_json::Deserializer::from_slice(&output.stdout).into_iter::<BatchRow>()
             {
                 let BatchRow { seed, hole, result } = row?;
-                let (strokes, penalties, holed) = match result {
-                    BatchResult::Played {
-                        strokes,
-                        penalties,
-                        holed,
-                    } => (strokes, penalties, holed),
-                    BatchResult::Failed { error } => {
-                        return Err(format!(
-                            "hole {hole}, day {}, profile {name}, seed {seed}: {error}",
-                            day.name
-                        )
-                        .into());
-                    }
-                };
-                let record = HoleRecord::from_bytes(&fs::read(
-                    records.join(format!("hole-{hole}-seed-{seed}.rec")),
-                )?)?;
-                plays.push(Play::from_record(
-                    &course, &record, &day.name, name, strokes, penalties, holed,
-                )?);
+                match collect_play(&course, &records, &day.name, name, seed, hole, result) {
+                    Ok(play) => plays.push(play),
+                    Err(error) => errors.push(PlayError {
+                        hole,
+                        day: day.name.clone(),
+                        profile: name.into(),
+                        seed,
+                        error,
+                    }),
+                }
             }
             fs::remove_dir_all(records)?;
         }
     }
 
-    let report = Report::from_plays(plays);
+    let report = Report::from_plays(plays, errors);
     let mut output = BufWriter::new(io::stdout().lock());
     if args.json {
         serde_json::to_writer(&mut output, &report)?;
@@ -174,6 +165,30 @@ pub fn run(command: Command) -> Outcome {
     }
     output.flush()?;
     Ok(())
+}
+
+fn collect_play(
+    course: &Course,
+    records: &std::path::Path,
+    day: &str,
+    profile: &str,
+    seed: i64,
+    hole: i64,
+    result: BatchResult,
+) -> Result<Play, String> {
+    let (strokes, penalties, holed) = match result {
+        BatchResult::Played {
+            strokes,
+            penalties,
+            holed,
+        } => (strokes, penalties, holed),
+        BatchResult::Failed { error } => return Err(error),
+    };
+    let path = records.join(format!("hole-{hole}-seed-{seed}.rec"));
+    let bytes = fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let record = HoleRecord::from_bytes(&bytes).map_err(|error| error.to_string())?;
+    Play::from_record(course, &record, day, profile, strokes, penalties, holed)
+        .map_err(|error| error.to_string())
 }
 
 struct Scratch(PathBuf);

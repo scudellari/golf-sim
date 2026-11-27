@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use golf_sim::{
+    hole::Hole,
     records::hole::{Entry, HoleRecord, Refusal, StrokeEntry, SwingPress, decode_envelope},
     setup::{HoleSetup, Mode, PlaySetting, PlaySettings, Profile, StrikeVariant},
 };
@@ -328,6 +329,17 @@ fn frame(dict: Dict) -> Vec<u8> {
 }
 
 #[test]
+fn resumes_a_record_written_by_another_release_and_commit() {
+    let course = Course::open(&testdata().join("courses/test-course")).unwrap();
+    let setup = HoleSetup::standard(&course, 1, Seed(17));
+    let mut record = HoleRecord::begin(setup, HoleRecord::agent_driver("test"));
+    *record.versions.get_mut("release").unwrap() = "0.1.0".into();
+    *record.versions.get_mut("commit").unwrap() = "earlier".into();
+    let resumed = Hole::resume(course, &record.to_bytes().unwrap()).unwrap();
+    assert_eq!(resumed.record(), &record);
+}
+
+#[test]
 fn incompatible_and_malformed_records_are_refused() {
     let mut record = first_record();
     let bytes = record.to_bytes().unwrap();
@@ -368,8 +380,6 @@ fn incompatible_and_malformed_records_are_refused() {
     *record.versions.get_mut("record").unwrap() = "5".into();
 
     for (model, current) in [
-        ("release", env!("CARGO_PKG_VERSION")),
-        ("commit", option_env!("GOLF_SIM_COMMIT").unwrap_or("dev")),
         ("physics", golf_sim_physics::tunables::VERSION),
         ("tuning", golf_sim_stroke::tuning::VERSION),
         ("rules", golf_sim_rules::VERSION),

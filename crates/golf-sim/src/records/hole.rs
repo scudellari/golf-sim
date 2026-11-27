@@ -17,9 +17,7 @@ const MAGIC: &[u8; 8] = b"LLHOLE01";
 const FORMAT: &str = "links-lab-hole-record";
 pub const FORMAT_VERSION: &str = "5";
 
-const BUILD_VERSIONS: [(&str, &str); 5] = [
-    ("release", env!("CARGO_PKG_VERSION")),
-    ("commit", GOLF_SIM_COMMIT),
+const MODEL_VERSIONS: [(&str, &str); 3] = [
     ("physics", golf_sim_physics::tunables::VERSION),
     ("tuning", golf_sim_stroke::tuning::VERSION),
     ("rules", golf_sim_rules::VERSION),
@@ -93,9 +91,13 @@ pub struct HoleRecord {
 impl HoleRecord {
     pub fn begin(setup: HoleSetup, driver: Dict) -> Self {
         let versions = dictionary(
-            [("record", FORMAT_VERSION.into())]
-                .into_iter()
-                .chain(BUILD_VERSIONS.map(|(key, value)| (key, value.into()))),
+            [
+                ("record", FORMAT_VERSION.into()),
+                ("release", env!("CARGO_PKG_VERSION").into()),
+                ("commit", GOLF_SIM_COMMIT.into()),
+            ]
+            .into_iter()
+            .chain(MODEL_VERSIONS.map(|(key, value)| (key, value.into()))),
         );
         Self {
             versions,
@@ -179,7 +181,9 @@ impl HoleRecord {
         if written != FORMAT_VERSION {
             return Err(Refusal::UnsupportedFormat(written.into()));
         }
-        for (model, current) in BUILD_VERSIONS {
+        versions.string("release")?;
+        versions.string("commit")?;
+        for (model, current) in MODEL_VERSIONS {
             let recorded = versions.string(model)?;
             if recorded != current {
                 return Err(Refusal::IncompatibleVersion {

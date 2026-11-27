@@ -164,15 +164,30 @@ fn generated_days_are_refused_until_the_generator_lands() {
 }
 
 #[test]
-fn refused_sweep_plays_save_repros_in_scratch() {
+fn refused_sweep_plays_are_error_rows_and_save_repros() {
     let dir = Scratch::new();
-    let output = sweep(&dir)
-        .args(["--holes", "99", "--seeds", "5-5"])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("hole 99"), "{error}");
+    let output = success(
+        sweep(&dir)
+            .args([
+                "--holes",
+                "99,1",
+                "--seeds",
+                "5-5",
+                "--profiles",
+                "scratch",
+                "--json",
+            ])
+            .output()
+            .unwrap(),
+    );
+    let report: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["holes"][0]["hole"], 1);
+    assert_eq!(report["holes"][0]["plays"], 1);
+    let errors = report["errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["hole"], 99);
+    assert_eq!(errors[0]["seed"], 5);
+    assert!(errors[0]["error"].is_string());
     assert!(
         dir.0
             .join("repros/batch-hole-99-seed-5/record.bin")

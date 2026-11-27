@@ -155,6 +155,17 @@ fn landing_area(tee: &Tee) -> Option<Vec3> {
 #[derive(Serialize)]
 pub struct Report {
     holes: Vec<HoleReport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    errors: Vec<PlayError>,
+}
+
+#[derive(Serialize)]
+pub struct PlayError {
+    pub hole: i64,
+    pub day: String,
+    pub profile: String,
+    pub seed: i64,
+    pub error: String,
 }
 
 #[derive(Serialize)]
@@ -176,7 +187,7 @@ struct HoleReport {
 }
 
 impl Report {
-    pub fn from_plays(mut plays: Vec<Play>) -> Self {
+    pub fn from_plays(mut plays: Vec<Play>, errors: Vec<PlayError>) -> Self {
         plays.sort_unstable_by(|a, b| {
             (a.hole, &a.day, &a.profile, a.seed).cmp(&(b.hole, &b.day, &b.profile, b.seed))
         });
@@ -224,7 +235,7 @@ impl Report {
             report.std_dev = fm::sqrt(variance);
             holes.push(report);
         }
-        Self { holes }
+        Self { holes, errors }
     }
 
     pub fn write_text(&self, mut out: impl io::Write) -> io::Result<()> {
@@ -275,6 +286,16 @@ impl Report {
                     finish.surface,
                     finish.target,
                     finish.distance_m
+                )?;
+            }
+        }
+        if !self.errors.is_empty() {
+            writeln!(out, "\nHole Day      Profile                 Seed Error")?;
+            for row in &self.errors {
+                writeln!(
+                    out,
+                    "{:>4} {:<8} {:<7} {:>20} {}",
+                    row.hole, row.day, row.profile, row.seed, row.error
                 )?;
             }
         }
