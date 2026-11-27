@@ -41,6 +41,17 @@ impl Default for Options {
     }
 }
 
+/// A kinematic state at an integration boundary. Event indices are zero-based.
+#[derive(Clone, Copy, Debug)]
+pub struct Checkpoint {
+    pub event_index: usize,
+    pub kind: EventKind,
+    pub time_s: Real,
+    pub position: Vec3,
+    pub velocity: Vec3,
+    pub spin: Vec3,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Phase {
     Flight,
@@ -80,6 +91,7 @@ struct Run<'a> {
     next_trace_sample: Option<Real>,
     apex_done: bool,
     in_canopy: bool,
+    checkpoint: Option<Checkpoint>,
 }
 
 /// Integrate an already resolved launch until the ball comes to rest or play ends.
@@ -112,6 +124,47 @@ pub(crate) fn run_with_flagstick<P: Probe>(
     options: Options,
     probe: &mut P,
 ) -> ShotResult {
+    integrate(launch, ball, conditions, ground, cup, options, None, probe).0
+}
+
+/// Rerun up to a checkpoint and continue with its kinematic state.
+/// The solver retains the phase, sampling grid, and prior events.
+pub fn run_with_checkpoint(
+    launch: &Launch,
+    ball: &BallSpec,
+    conditions: &dyn AirSampler,
+    ground: &dyn GroundSampler,
+    cup: Option<Cup>,
+    options: Options,
+    checkpoint: Checkpoint,
+) -> Option<ShotResult> {
+    let (result, applied) = integrate(
+        launch,
+        ball,
+        conditions,
+        ground,
+        cup.map(|cup| (cup, t::FLAGSTICK_RESTITUTION)),
+        options,
+        Some(checkpoint),
+        &mut golf_sim_base::trace::NoProbe,
+    );
+    applied.then_some(result)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the integration context is shared by both entry points"
+)]
+fn integrate<P: Probe>(
+    launch: &Launch,
+    ball: &BallSpec,
+    conditions: &dyn AirSampler,
+    ground: &dyn GroundSampler,
+    cup: Option<(Cup, Real)>,
+    options: Options,
+    checkpoint: Option<Checkpoint>,
+    probe: &mut P,
+) -> (ShotResult, bool) {
     let _span = log::tracing::debug_span!(log::STROKE, time_s = options.time_s).entered();
     let mut result = ShotResult {
         launch: Some(*launch),
@@ -123,7 +176,7 @@ pub(crate) fn run_with_flagstick<P: Probe>(
         } else {
             EndReason::Timeout
         };
-        return result;
+        return (result, false);
     }
     if !options.step_scale.is_finite()
         || options.step_scale <= 0.0
@@ -135,7 +188,7 @@ pub(crate) fn run_with_flagstick<P: Probe>(
         result.rest_surface = ground
             .sample_ground(launch.position.x, launch.position.z)
             .surface;
-        return result;
+        return (result, false);
     }
 
     let current_ground = ground.sample_ground(launch.position.x, launch.position.z);
@@ -182,6 +235,7 @@ pub(crate) fn run_with_flagstick<P: Probe>(
         next_trace_sample: None,
         apex_done: false,
         in_canopy: false,
+        checkpoint,
     };
     stroke.leave_lie(probe);
     let mut stationary_steps = 0;
@@ -225,7 +279,7 @@ pub(crate) fn run_with_flagstick<P: Probe>(
             stroke.finish(EndReason::Timeout);
         }
     }
-    stroke.result
+    (stroke.result, stroke.checkpoint.is_none())
 }
 
 impl Run<'_> {
@@ -490,10 +544,18 @@ impl Run<'_> {
     }
 
     fn touch_down<P: Probe>(&mut self, probe: &mut P) {
-        let ground = self.current_ground;
-        self.position.y = supported_height(ground, self.ball.radius_m);
+        self.position.y = supported_height(self.current_ground, self.ball.radius_m);
         self.next_trace_sample = None;
         let first = self.result.touchdowns.is_empty();
+        if first {
+            // Landing records the incoming state, after any surface-entry event.
+            let enters_surface = self.current_ground.surface != self.surface;
+            self.apply_checkpoint(
+                EventKind::Landing,
+                self.result.events.len() + usize::from(enters_surface),
+            );
+        }
+        let ground = self.current_ground;
         self.cup_entered = false;
         self.result.touchdowns.push(Touchdown {
             time_s: self.time,
@@ -876,8 +938,54 @@ impl Run<'_> {
     }
 
     fn emit(&mut self, kind: EventKind) {
+        if self.checkpoint.is_some()
+            && matches!(
+                kind,
+                EventKind::Bounce
+                    | EventKind::RollStart
+                    | EventKind::PureRoll
+                    | EventKind::Obstacle
+                    | EventKind::CupEntry
+                    | EventKind::LipOut
+            )
+        {
+            self.apply_checkpoint(kind, self.result.events.len());
+        }
         self.insert_event(kind, self.time, self.position, self.velocity);
         self.record_at(self.time, self.position);
+    }
+
+    fn apply_checkpoint(&mut self, kind: EventKind, event_index: usize) {
+        let Some(state) = self
+            .checkpoint
+            .filter(|state| state.kind == kind && state.event_index == event_index)
+        else {
+            return;
+        };
+        if !state.position.is_finite()
+            || !state.velocity.is_finite()
+            || !state.spin.is_finite()
+            || !state.time_s.is_finite()
+            || self
+                .result
+                .events
+                .last()
+                .is_some_and(|event| event.time_s > state.time_s)
+        {
+            return;
+        }
+        let ground = self.ground_at(state.position);
+        if ground.surface != self.current_ground.surface {
+            return;
+        }
+        self.checkpoint = None;
+        self.time = state.time_s;
+        self.position = state.position;
+        self.velocity = state.velocity;
+        self.spin = state.spin;
+        self.current_ground = ground;
+        self.zone_from = state.position;
+        self.zone_time = state.time_s;
     }
 
     fn insert_event(&mut self, kind: EventKind, time: Real, position: Vec3, velocity: Vec3) {

@@ -1,10 +1,14 @@
-//! Evidence for a periodic sample immediately before the rest event.
+//! Compare chronological shot checkpoints and verify response thresholds.
 
 use golf_sim_base::{
-    Real, Surface, fm,
+    Real, Surface, Vec3, fm,
     variant::{Dict, Variant},
 };
-use golf_sim_physics::{tunables as t, values::EventKind};
+use golf_sim_physics::{
+    integrator::Checkpoint as IntegrationCheckpoint, tunables as t, values::EventKind,
+};
+
+use crate::tolerance::Layer;
 
 const STEP: Real = f32::EPSILON as Real;
 const CLOCK_EPSILON: Real = 1e-9;
@@ -242,6 +246,57 @@ impl Checkpoint {
                 })
         })
     }
+
+    fn replay_failure(&self, prefix: &str, field: &str, shot: &Dict, reason: &str) -> String {
+        let phase = if let Some(response) = self.response {
+            response
+        } else if self.time > 0.0 && in_flight(shot, self.time) {
+            "free flight"
+        } else {
+            "away from a response"
+        };
+        format!(
+            "{prefix}{} at {:.9} s ({phase}; {reason})",
+            self.field(field),
+            self.time
+        )
+    }
+}
+
+fn in_flight(shot: &Dict, stamp: Real) -> bool {
+    array(shot, "events")
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|event| {
+            let event = event.as_dict()?;
+            let time = time(event)?;
+            let kind = code(event, "kind")?;
+            let flying = match kind {
+                k if [EventKind::Impact, EventKind::Release, EventKind::Bounce]
+                    .iter()
+                    .any(|event| *event as i64 == k) =>
+                {
+                    true
+                }
+                k if [
+                    EventKind::Landing,
+                    EventKind::RollStart,
+                    EventKind::PureRoll,
+                    EventKind::CupEntry,
+                    EventKind::Holed,
+                    EventKind::Rest,
+                ]
+                .iter()
+                .any(|event| *event as i64 == k) =>
+                {
+                    false
+                }
+                _ => return None,
+            };
+            (time <= stamp).then_some((time, flying))
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .is_some_and(|(_, flying)| flying)
 }
 
 fn vector_variant(values: [Real; 3]) -> Variant {
@@ -318,9 +373,14 @@ fn checkpoints(a: &Dict, b: &Dict) -> Vec<Checkpoint> {
             .map(|(_, kind)| *kind)
     };
     for checkpoint in &mut result[1..] {
-        checkpoint.response = checkpoint
-            .response
-            .or_else(|| history(checkpoint.time, t::FLIGHT_DT));
+        let is_apex = [&checkpoint.a, &checkpoint.b].iter().any(|event| {
+            event.as_dict().and_then(|fields| code(fields, "kind")) == Some(EventKind::Apex as i64)
+        });
+        if !is_apex {
+            checkpoint.response = checkpoint
+                .response
+                .or_else(|| history(checkpoint.time, t::FLIGHT_DT));
+        }
     }
     let samples = |shot: &Dict| -> Vec<(Real, [Real; 3])> {
         match (shot.get("times"), shot.get("positions")) {
@@ -367,167 +427,259 @@ fn checkpoints(a: &Dict, b: &Dict) -> Vec<Checkpoint> {
     result
 }
 
-pub(crate) struct Evidence {
-    pub first: String,
-    pub rounding: Result<(), String>,
-    pub over_bound: String,
-    pub threshold: Option<&'static str>,
-    pub time_s: Real,
+pub(crate) fn check_initial_rounding(expected: &Variant, raw: &Variant) -> Result<String, String> {
+    let points = checkpoints(shot_fields(expected)?, shot_fields(raw)?);
+    let Some((first, detail)) = points
+        .iter()
+        .find_map(|point| Some((point, point.first_difference()?)))
+    else {
+        return Err("no differing trajectory checkpoint".into());
+    };
+    for point in points.iter().take_while(|point| point.time <= first.time) {
+        if let Some(field) = point.rounding_difference() {
+            return Err(format!(
+                "first checkpoint exceeds float rounding at {}",
+                point.field(&field)
+            ));
+        }
+    }
+    Ok(detail)
 }
 
-pub(crate) fn evidence(
-    expected: &Variant,
-    raw: &Variant,
-    compared: &Variant,
-    limits: &crate::tolerance::Layer,
-    delivered: Option<Result<(), String>>,
-    step_scale: Real,
-) -> Result<Evidence, String> {
-    let shot = |value: &Variant| {
-        value
-            .as_dict()
-            .is_some_and(|fields| fields.get("playback").is_some())
-    };
-    let prefix = if shot(expected) { "playback." } else { "" };
-    let read = |value: &Variant| -> Option<()> {
-        playback(value)?.as_dict()?;
-        Some(())
-    };
-    for value in [expected, raw, compared] {
-        read(value).ok_or("missing shot checkpoints")?;
-    }
-    let dict = |value| playback(value).unwrap().as_dict().unwrap();
-    let raw_points = checkpoints(dict(expected), dict(raw));
-    let first = raw_points.iter().find_map(|point| {
-        point
-            .first_difference()
-            .map(|difference| (point.time, difference))
-    });
-    let first_time = first.as_ref().map(|(time, _)| *time);
-    let first = first.map_or_else(
-        || "no differing trajectory checkpoint".into(),
-        |(_, value)| value,
-    );
-    let rounding = delivered.unwrap_or_else(|| {
-        let time = first_time.ok_or("no differing trajectory checkpoint")?;
-        let beyond = raw_points
-            .iter()
-            .take_while(|point| point.time <= time)
-            .find_map(|point| Some(point.field(&point.rounding_difference()?)));
-        beyond.map_or(Ok(()), |path| {
-            Err(format!("first checkpoint exceeds float rounding at {path}"))
-        })
-    });
+#[derive(Debug)]
+pub(crate) struct VerifiedResponse {
+    pub threshold: &'static str,
+    pub first_over_bound: String,
+}
 
-    let mut ordinary = checkpoints(dict(expected), dict(compared));
-    // The raw first checkpoint uses the state propagated by flight. The normal
-    // comparison also checks launch readouts and metadata before any response.
-    include_launch_readouts(&mut ordinary, dict(expected), dict(compared));
-    let early_fields = [
-        ("fault", ""),
-        ("quality", ""),
-        ("fat", ""),
-        ("start", "outcome"),
-        ("ball_radius_m", "outcome"),
-    ];
-    if !prefix.is_empty() {
-        for (key, section) in early_fields {
-            let value = |output| field_at(output, section, key).unwrap_or(&Variant::Nil);
-            let path = if section.is_empty() {
-                key.into()
-            } else {
-                format!("{section}.{key}")
-            };
-            if limits
-                .checkpoint_difference(value(expected), value(compared), &path)
-                .is_some()
-            {
-                return Ok(Evidence {
-                    first,
-                    rounding,
-                    over_bound: format!("{path} before flight"),
-                    threshold: None,
-                    time_s: 0.0,
-                });
-            }
-        }
+pub(crate) fn verify_response(
+    expected: &Variant,
+    computed: &Variant,
+    limits: &Layer,
+    step_scale: Real,
+    replay: impl FnOnce(IntegrationCheckpoint) -> Result<Variant, String>,
+) -> Result<Option<VerifiedResponse>, String> {
+    let reference = shot_fields(expected)?;
+    let actual = shot_fields(computed)?;
+    let prefix = if expected
+        .as_dict()
+        .is_some_and(|fields| fields.get("playback").is_some())
+    {
+        "playback."
+    } else {
+        ""
+    };
+    let aligned = align_outputs(expected, computed, limits, prefix, step_scale);
+    let (a, b) = aligned
+        .as_ref()
+        .map_or((expected, computed), |(a, b)| (a, b));
+    let Some(failure) = first_failure(a, b, prefix, limits) else {
+        return Ok(aligned.as_ref().and_then(|_| {
+            Some(VerifiedResponse {
+                threshold: "stop playback tick",
+                first_over_bound: first_failure(expected, computed, prefix, limits)?.message,
+            })
+        }));
+    };
+    if let Some(field) = limits.checkpoint_discrete_difference(a, b) {
+        return Err(format!(
+            "{}; discrete difference at {field}",
+            failure.message
+        ));
     }
-    for point in &ordinary {
-        let row = format!("{prefix}{}", point.path);
-        let Some(local) = limits.checkpoint_difference(&point.a, &point.b, &row) else {
-            continue;
-        };
-        let over_bound = format!("{} at {:.9} s", point.field(&local), point.time);
-        // A length mismatch at the end can arise when only one run samples the last roll tick.
-        if point.response == Some("stop")
-            && point.path.starts_with("times[")
-            && (point.a == Variant::Nil || point.b == Variant::Nil)
-            && let Ok((aligned_a, aligned_b, _)) = align_tick(
-                playback(expected).unwrap(),
-                playback(compared).unwrap(),
-                step_scale,
+    let Some(threshold) = failure.response else {
+        return Err(failure.message);
+    };
+    let Some(checkpoint) = incoming_checkpoint(reference, actual, prefix, limits, &failure) else {
+        return Err(failure.message);
+    };
+    let resumed = replay(checkpoint).map_err(|error| {
+        format!(
+            "{}; restarting at {:?}: {error}",
+            failure.message, checkpoint.kind
+        )
+    })?;
+    let aligned = align_outputs(expected, &resumed, limits, prefix, step_scale);
+    let (a, b) = aligned
+        .as_ref()
+        .map_or((expected, &resumed), |(a, b)| (a, b));
+    if let Some(after) = first_failure(a, b, prefix, limits) {
+        return Err(if failure.message == after.message {
+            failure.message
+        } else {
+            format!(
+                "{}; restarting at {:?}: {}",
+                failure.message, checkpoint.kind, after.message
             )
-            && limits
-                .checkpoint_difference(&aligned_a, &aligned_b, prefix.trim_end_matches('.'))
-                .is_none()
-        {
-            return Ok(Evidence {
-                first,
-                rounding,
-                over_bound,
-                threshold: Some("stop playback tick"),
-                time_s: point.time,
-            });
-        }
-        return Ok(Evidence {
-            first,
-            rounding,
-            over_bound,
-            threshold: point.response,
-            time_s: point.time,
         });
     }
-    let diff = limits
-        .checkpoint_difference(expected, compared, "")
-        .ok_or("the shot has no over-bound checkpoint")?;
-    let terminal = if [
-        "rest_position",
-        "rest_surface",
-        "end_reason",
-        "embedded",
-        "playback.rest_position",
-        "playback.rest_surface",
-        "playback.end_reason",
-        "playback.embedded",
-        "outcome.rest",
-        "outcome.rest_surface",
-        "outcome.end",
-        "outcome.total_m",
-    ]
-    .iter()
-    .any(|path| diff == *path || diff.starts_with(&format!("{path}.")))
-    {
-        ordinary
-            .iter()
-            .rev()
-            .find_map(|point| {
-                point
-                    .path
-                    .starts_with("events[")
-                    .then(|| point.a.as_dict().or_else(|| point.b.as_dict()))
-                    .flatten()
+    Ok(Some(VerifiedResponse {
+        threshold,
+        first_over_bound: failure.message,
+    }))
+}
+
+pub(crate) fn first_response_difference(
+    expected: &Variant,
+    computed: &Variant,
+    limits: &Layer,
+) -> Option<(&'static str, Real)> {
+    let failure = first_failure(expected, computed, "playback.", limits)?;
+    Some((failure.response?, failure.time))
+}
+
+struct Failure {
+    message: String,
+    time: Real,
+    path: String,
+    response: Option<&'static str>,
+}
+
+fn first_failure(
+    expected: &Variant,
+    computed: &Variant,
+    prefix: &str,
+    limits: &Layer,
+) -> Option<Failure> {
+    let field = limits
+        .checkpoint_difference(expected, computed, "")
+        .or_else(|| limits.checkpoint_discrete_difference(expected, computed))?;
+    let reference = shot_fields(expected).ok()?;
+    let actual = shot_fields(computed).ok()?;
+    let mut points = checkpoints(reference, actual);
+    include_launch_readouts(&mut points, reference, actual);
+    for point in &points {
+        let path = format!("{prefix}{}", point.path);
+        if let Some(field) = limits.checkpoint_difference(&point.a, &point.b, &path) {
+            return Some(Failure {
+                message: point.replay_failure(prefix, &field, reference, "exceeds output row"),
+                time: point.time,
+                path: point.path.clone(),
+                response: point.response,
+            });
+        }
+    }
+    let terminal = ["rest_position", "outcome.rest", "outcome.total_m"]
+        .into_iter()
+        .any(|key| {
+            let bare = field.strip_prefix(prefix).unwrap_or(&field);
+            bare == key
+                || bare
+                    .strip_prefix(key)
+                    .is_some_and(|tail| tail.starts_with('.'))
+        });
+    let time = points.last().map_or(0.0, |point| point.time);
+    Some(Failure {
+        message: format!("{field} at {time:.9} s (whole-shot output)"),
+        time,
+        path: field,
+        response: terminal
+            .then(|| {
+                let last = array(reference, "events")?.last()?.as_dict()?;
+                response(code(last, "kind")?)
             })
-            .and_then(|event| time(event).zip(code(event, "kind").and_then(response)))
-    } else {
-        None
-    };
-    Ok(Evidence {
-        first,
-        rounding,
-        over_bound: diff,
-        threshold: terminal.map(|(_, kind)| kind),
-        time_s: terminal.map_or(Real::INFINITY, |(time, _)| time),
+            .flatten(),
     })
+}
+
+fn incoming_checkpoint(
+    reference: &Dict,
+    actual: &Dict,
+    prefix: &str,
+    limits: &Layer,
+    failure: &Failure,
+) -> Option<IntegrationCheckpoint> {
+    let reference = array(reference, "events")?;
+    let actual = array(actual, "events")?;
+    let vector = |fields: &Dict, key| {
+        let Variant::Vector3(point) = fields.get(key)? else {
+            return None;
+        };
+        let [x, y, z] = point.values;
+        Some(Vec3::new(x, y, z))
+    };
+    reference
+        .iter()
+        .zip(actual)
+        .enumerate()
+        .rev()
+        .find_map(|(event_index, (a, b))| {
+            let fields = a.as_dict()?;
+            let time_s = time(fields)?;
+            let path = format!("events[{event_index}]");
+            let kind = [
+                EventKind::Landing,
+                EventKind::Bounce,
+                EventKind::RollStart,
+                EventKind::PureRoll,
+                EventKind::Obstacle,
+                EventKind::CupEntry,
+                EventKind::LipOut,
+            ]
+            .into_iter()
+            .find(|kind| code(fields, "kind") == Some(*kind as i64))?;
+            if time_s > failure.time
+                || path == failure.path
+                || (time_s == failure.time && failure.path.starts_with("touchdowns["))
+                || limits
+                    .checkpoint_difference(a, b, &format!("{prefix}{path}"))
+                    .is_some()
+            {
+                return None;
+            }
+            Some(IntegrationCheckpoint {
+                event_index,
+                kind,
+                time_s,
+                position: vector(fields, "position")?,
+                velocity: vector(fields, "velocity")?,
+                spin: vector(fields, "spin")?,
+            })
+        })
+}
+
+fn align_outputs(
+    expected: &Variant,
+    computed: &Variant,
+    limits: &Layer,
+    prefix: &str,
+    step_scale: Real,
+) -> Option<(Variant, Variant)> {
+    let (a, b, _) = align_tick(playback(expected)?, playback(computed)?, step_scale).ok()?;
+    let (a_shot, b_shot) = (a.as_dict()?, b.as_dict()?);
+    let a_before = shot_fields(expected).ok()?;
+    let b_before = shot_fields(computed).ok()?;
+    let positions = |dict: &Dict| match dict.get("positions") {
+        Some(Variant::PackedVector3Array(points)) => Some(points.values.clone()),
+        _ => None,
+    };
+    let (long, short) = if positions(a_before)?.len() > positions(b_before)?.len() {
+        (positions(a_before)?, positions(b_shot)?)
+    } else {
+        (positions(b_before)?, positions(a_shot)?)
+    };
+    let index = long.len() - 2;
+    let midpoint = std::array::from_fn(|axis| (short[index - 1][axis] + short[index][axis]) * 0.5);
+    limits
+        .checkpoint_difference(
+            &vector_variant(long[index]),
+            &vector_variant(midpoint),
+            &format!("{prefix}positions[{index}]"),
+        )
+        .is_none()
+        .then(|| {
+            let with_playback = |result: &Variant, shot: Variant| {
+                if prefix.is_empty() {
+                    return shot;
+                }
+                let mut output = result.clone();
+                if let Variant::Dict(fields) = &mut output {
+                    *fields.get_mut("playback").unwrap() = shot;
+                }
+                output
+            };
+            (with_playback(expected, a), with_playback(computed, b))
+        })
 }
 
 fn include_launch_readouts(points: &mut [Checkpoint], expected: &Dict, actual: &Dict) {
@@ -539,19 +691,15 @@ fn include_launch_readouts(points: &mut [Checkpoint], expected: &Dict, actual: &
     launch.b = actual.get("launch").cloned().unwrap_or(Variant::Nil);
 }
 
-fn field_at<'a>(output: &'a Variant, section: &str, key: &str) -> Option<&'a Variant> {
-    let output = output.as_dict()?;
-    let fields = if section.is_empty() {
-        output
-    } else {
-        output.get(section)?.as_dict()?
-    };
-    fields.get(key)
-}
-
-fn playback(value: &Variant) -> Option<&Variant> {
+pub(crate) fn playback(value: &Variant) -> Option<&Variant> {
     let fields = value.as_dict()?;
     Some(fields.get("playback").unwrap_or(value))
+}
+
+fn shot_fields(value: &Variant) -> Result<&Dict, &'static str> {
+    playback(value)
+        .and_then(Variant::as_dict)
+        .ok_or("missing shot checkpoints")
 }
 
 #[cfg(test)]
@@ -652,14 +800,119 @@ mod tests {
     }
 
     #[test]
+    fn extra_tick_position_still_has_a_row() {
+        let reference = shot(false, 0.0);
+        let core = shot(true, STEP);
+        let limits = Layer::for_fixture(std::path::Path::new(""), "physics/strokes").unwrap();
+        let replay = |_| panic!("the aligned trajectory should be checked directly");
+        let proof = verify_response(&reference, &core, &limits, 1.0, replay)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.threshold, "stop playback tick");
+        let mut core = core;
+        let Variant::Dict(fields) = &mut core else {
+            unreachable!()
+        };
+        let Some(Variant::PackedVector3Array(positions)) = fields.get_mut("positions") else {
+            unreachable!()
+        };
+        let extra = positions.values.len() - 2;
+        positions.values[extra][0] = 100.0;
+        assert!(verify_response(&reference, &core, &limits, 1.0, replay).is_err());
+    }
+
+    #[test]
+    fn stop_replay_checks_rest_and_end_reason() {
+        use golf_sim_base::trace::NoProbe;
+        use golf_sim_physics::{
+            integrator::{self, Options},
+            plane::{ConstantAir, PlaneGround},
+            values::Launch,
+        };
+
+        let ground = PlaneGround::default();
+        let air = ConstantAir::new(golf_sim_physics::facade::standard_air());
+        let radius = t::BALL.radius_m;
+        let speed = t::ROLL_STOP_SPEED - 0.01 * STEP;
+        let launch = Launch {
+            position: Vec3::new(0.0, radius, 0.0),
+            velocity: Vec3::new(speed, 0.0, 0.0),
+            spin: Vec3::new(0.0, 0.0, -speed / radius),
+            ..Launch::default()
+        };
+        let options = Options::default();
+        let computed = integrator::run(
+            &launch,
+            &t::BALL,
+            &air,
+            &ground,
+            None,
+            options,
+            &mut NoProbe,
+        );
+        let (event_index, roll) = computed
+            .events
+            .iter()
+            .enumerate()
+            .find(|(_, event)| event.kind == EventKind::PureRoll)
+            .unwrap();
+        let replay = |state| {
+            let shot = integrator::run_with_checkpoint(
+                &launch,
+                &t::BALL,
+                &air,
+                &ground,
+                None,
+                options,
+                state,
+            )
+            .ok_or("missing roll checkpoint")?;
+            Ok(super::super::shot_snapshot(&shot))
+        };
+        let speed = t::ROLL_STOP_SPEED + 0.01 * STEP;
+        let state = IntegrationCheckpoint {
+            event_index,
+            kind: EventKind::PureRoll,
+            time_s: roll.time_s,
+            position: roll.position,
+            velocity: Vec3::new(speed, 0.0, 0.0),
+            spin: Vec3::new(0.0, 0.0, -speed / radius),
+        };
+        let expected = replay(state).unwrap();
+        let computed = super::super::shot_snapshot(&computed);
+        let limits = Layer::for_fixture(std::path::Path::new(""), "physics/strokes").unwrap();
+        assert!(check_initial_rounding(&expected, &computed).is_ok());
+        let proof = verify_response(&expected, &computed, &limits, 1.0, replay)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proof.threshold, "stop");
+
+        for (key, wrong) in [
+            ("rest_position", vector_variant([100.0, radius, 0.0])),
+            ("end_reason", 99_i64.into()),
+        ] {
+            let mut mutated = expected.clone();
+            let Variant::Dict(fields) = &mut mutated else {
+                unreachable!()
+            };
+            *fields.get_mut(key).unwrap() = wrong;
+            let error = verify_response(&mutated, &computed, &limits, 1.0, replay).unwrap_err();
+            assert!(error.contains(key), "{error}");
+        }
+    }
+
+    #[test]
     fn a_free_flight_failure_stays_free_flight_before_a_later_stop() {
         let reference = shot(false, 0.0);
         let core = shot(true, 0.1);
         let limits =
             crate::tolerance::Layer::for_fixture(std::path::Path::new(""), "physics/strokes")
                 .unwrap();
-        let proof = evidence(&reference, &core, &core, &limits, Some(Ok(())), 1.0).unwrap();
-        assert!(proof.over_bound.starts_with("positions[1]"));
-        assert_eq!(proof.threshold, None);
+        let failure = verify_response(&reference, &core, &limits, 1.0, |_| {
+            panic!("a free flight failure cannot use a later response")
+        })
+        .unwrap_err();
+        assert!(failure.starts_with("positions[1].y"));
+        assert!(failure.contains("free flight"));
     }
 }

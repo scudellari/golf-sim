@@ -165,24 +165,47 @@ pub fn play(
     world: &World<'_>,
     probe: &mut impl Probe,
 ) -> StrokeResult {
+    play_with_simulation(
+        input,
+        execution,
+        world,
+        probe,
+        |request, air, ground, probe| Some(sim::simulate_shot(request, air, ground, true, probe)),
+    )
+    .expect("playing a shot always returns a result")
+}
+
+/// Interpret a simulation in the context of the prepared stroke.
+pub fn play_with_simulation<P: Probe>(
+    input: &StrokeInput,
+    execution: Execution,
+    world: &World<'_>,
+    probe: &mut P,
+    simulate: impl FnOnce(
+        &ShotRequest,
+        &dyn AirSampler,
+        &dyn GroundSampler,
+        &mut P,
+    ) -> Option<ShotResult>,
+) -> Option<StrokeResult> {
     let (mut request, fault) = request(input, execution, true, probe);
     request.time_s = world.clock_s() + input.gust_time_s;
     request.cup = world.cup(input.flagstick_in);
     let air = world.air_at_impact(input.gust_time_s);
     let ground = world.ground();
-    let playback = sim::simulate_shot(&request, air, ground, true, probe);
+    let playback = simulate(&request, air, ground, probe)?;
     let launch = playback
         .launch
         .as_ref()
         .expect("a simulated shot records its launch");
     let fat = wrappers::fat(&request, launch, air, ground);
-    StrokeResult {
+    Some(StrokeResult {
         outcome: StrokeOutcome::from_shot(&playback, &request),
         quality: wrappers::quality(input.delivery.club, execution, launch, fat),
         playback,
         fault,
         fat,
-    }
+    })
 }
 
 pub fn launch(

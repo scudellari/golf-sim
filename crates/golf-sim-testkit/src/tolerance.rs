@@ -105,6 +105,21 @@ impl Layer {
             .ok_or_else(|| format!("no tolerances for {key:?}").into())
     }
 
+    pub(crate) fn checkpoint_discrete_difference(
+        &self,
+        expected: &Variant,
+        actual: &Variant,
+    ) -> Option<String> {
+        let mut numbers = Numbers {
+            exact_integers: true,
+            ..Numbers::default()
+        };
+        let expected = split_numbers(expected, "$", &mut numbers);
+        numbers.values.clear();
+        let actual = split_numbers(actual, "$", &mut numbers);
+        corpus::first_difference(&expected, &actual)
+    }
+
     pub(crate) fn checkpoint_difference(
         &self,
         expected: &Variant,
@@ -569,6 +584,7 @@ fn finite_magnitude(value: Real) -> Real {
 struct Numbers {
     values: Vec<(String, Number)>,
     paths: Option<BTreeSet<String>>,
+    exact_integers: bool,
 }
 
 impl Numbers {
@@ -725,7 +741,7 @@ fn split_numbers(value: &Variant, path: &str, numbers: &mut Numbers) -> Variant 
         value => value.clone(),
     };
     match &mut discrete {
-        Int(value) => {
+        Int(value) if !numbers.exact_integers => {
             numbers.push(path.into(), Number::Integer(value.value()));
             *value = 0.into();
         }

@@ -137,9 +137,8 @@ impl ShotAt<'_> {
         let recorded = physics::shot_snapshot(&replay);
         let computed = physics::shot_snapshot(actual);
         let launch = launch_snapshot(actual.launch?);
-        let strike =
-            impact::verify_strike_rounding(reference, dict(&launch), self.request, self.ground);
-        let mut compared = computed.clone();
+        impact::verify_strike_rounding(reference, dict(&launch), self.request, self.ground).ok()?;
+        let mut compared = computed;
         impact::compare_shot_launch(
             dict(&recorded),
             fields_mut(&mut compared),
@@ -150,23 +149,9 @@ impl ShotAt<'_> {
         )
         .ok()?;
         let wrap = |shot| object([("playback", shot)]);
-        let proof = playback::evidence(
-            &wrap(recorded),
-            &wrap(computed),
-            &wrap(compared),
-            limits,
-            Some(strike),
-            1.0,
-        )
-        .ok()?;
-        if proof.rounding.is_ok()
-            && proof.threshold.is_some()
-            && matches_record(&replay, proof.time_s)
-        {
-            proof.threshold
-        } else {
-            None
-        }
+        let (threshold, time) =
+            playback::first_response_difference(&wrap(recorded), &wrap(compared), limits)?;
+        matches_record(&replay, time).then_some(threshold)
     }
 }
 

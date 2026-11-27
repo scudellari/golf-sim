@@ -481,17 +481,15 @@ impl FixtureRun {
         rule: &PrecisionDepartureRule,
         drift: bool,
     ) -> Result<CaseOutcome> {
+        if matches!(rule.call.as_str(), "golf_sim.simulate_shot" | "stroke.play") {
+            return self.run_recorded_launch(case, course, drift);
+        }
         let raw = self.stroke_outcome(case, course, true)?;
         let compared = self.stroke_outcome(case, course, false);
         let CaseOutcome::Compared { actual: raw, .. } = raw else {
             return Err(
                 "precision departure requires a stroke without a changed model response".into(),
             );
-        };
-        let delivered = match rule.call.as_str() {
-            "golf_sim.simulate_shot" => Some(physics::verify_delivery(case, &raw, course)),
-            "stroke.play" => Some(stroke::verify_delivery(case, &raw, course)),
-            _ => None,
         };
         let step_scale = if self.runner == Runner::PhysicsStrokes {
             match child(case, "input").and_then(|input| input.get("step_scale")) {
@@ -508,27 +506,92 @@ impl FixtureRun {
             );
         };
         let expected = case.get("output").ok_or("missing stroke output")?;
-        let evidence = physics::playback::evidence(
+        let rounding = physics::playback::check_initial_rounding(expected, &raw);
+        let limits = self.stroke_limits.as_ref().unwrap();
+        let proof = physics::playback::verify_response(
             expected,
-            &raw,
             &actual,
-            self.stroke_limits.as_ref().unwrap(),
-            delivered,
+            limits,
             step_scale,
-        )?;
-        evidence.rounding?;
-        if evidence.threshold != Some(rule.threshold.as_str()) {
+            |checkpoint| physics::replay_checkpoint(case, course, None, checkpoint),
+        )
+        .map_err(|failure| format!("replay from recorded launch: {failure}"))?;
+        let Some(proof) = proof else {
+            return Ok(actual.into());
+        };
+        let first =
+            rounding.map_err(|failure| format!("replay from recorded launch passed; {failure}"))?;
+        if proof.threshold != rule.threshold {
             return Err(format!(
-                "expected {} at the first over-bound checkpoint, found {:?} at {}; first difference {}",
-                rule.threshold, evidence.threshold, evidence.over_bound, evidence.first,
-            ).into());
+                "expected verified {} at the first over-bound checkpoint, found {}: {}",
+                rule.threshold, proof.threshold, proof.first_over_bound,
+            )
+            .into());
         }
         Ok(CaseOutcome::PrecisionDeparture {
             actual: if drift { raw } else { actual },
             change: format!(
-                "float rounding at {}; first difference {}; first over-bound {}",
-                rule.threshold, evidence.first, evidence.over_bound
+                "float rounding at {}; first difference {first}; first over-bound {}",
+                rule.threshold, proof.first_over_bound
             ),
+        })
+    }
+
+    fn run_recorded_launch(
+        &self,
+        case: &Dict,
+        course: Option<&Course>,
+        drift: bool,
+    ) -> Result<CaseOutcome> {
+        let CaseOutcome::Compared { actual, .. } = self.stroke_outcome(case, course, true)? else {
+            return Err("recorded-launch departure requires an unchanged strike model".into());
+        };
+        let limits = self.stroke_limits.as_ref().unwrap();
+        let strike = match self.runner {
+            Runner::PhysicsFacade => physics::verify_delivery(case, &actual, course, limits),
+            Runner::StrokeFacade => stroke::verify_delivery(case, &actual, course, limits),
+            _ => return Err("recorded-launch departure requires a delivered shot".into()),
+        };
+        let expected = case.get("output").ok_or("missing stroke output")?;
+        let launch = physics::playback::playback(expected)
+            .and_then(Variant::as_dict)
+            .and_then(|shot| child(shot, "launch"))
+            .map(physics::recorded_launch)
+            .ok_or("missing recorded launch")?;
+        let compared = |outcome| match outcome {
+            CaseOutcome::Compared { actual, .. } => Ok(actual),
+            _ => Err("recorded-launch replay reached a changed model response".into()),
+        };
+        let replay = |checkpoint| match self.runner {
+            Runner::PhysicsFacade => match checkpoint {
+                None => compared(self.stroke_models.run(|probe| {
+                    physics::facade_with_launch(case, course, probe, false, Some(&launch))
+                })?),
+                Some(checkpoint) => {
+                    physics::replay_checkpoint(case, course, Some(&launch), checkpoint)
+                }
+            },
+            Runner::StrokeFacade => compared(stroke::replay_from_launch(
+                case,
+                course,
+                self.stroke_models,
+                &launch,
+                checkpoint,
+            )?),
+            _ => unreachable!(),
+        };
+        let replayed =
+            replay(None).map_err(|error| format!("replay from recorded launch: {error}"))?;
+        physics::playback::verify_response(expected, &replayed, limits, 1.0, |checkpoint| {
+            replay(Some(checkpoint))
+        })
+        .map_err(|failure| format!("replay from recorded launch: {failure}"))?;
+        strike
+            .map_err(|failure| format!("strike: {failure}; replay from recorded launch passed"))?;
+        Ok(CaseOutcome::PrecisionDeparture {
+            actual: if drift { actual } else { replayed },
+            change: "launch rounding at the strike, flight verified from the recorded launch"
+                .into(),
         })
     }
 

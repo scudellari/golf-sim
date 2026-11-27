@@ -14,6 +14,7 @@ use golf_sim_conditions::{
 use golf_sim_course::course::Course;
 use golf_sim_physics::{
     facade as sim,
+    integrator::{self, Checkpoint, Options},
     plane::ConstantAir,
     samplers::{AirSample, AirSampler, GroundSampler},
     values::{Launch, ShotRequest, ShotResult},
@@ -415,11 +416,29 @@ impl DerivedChecks<'_> {
         reason: &str,
         allowed: impl FnOnce(Real, Real) -> Real,
     ) {
+        self.try_number(expected, actual, key, reason, |a, b| Ok(allowed(a, b)));
+    }
+
+    fn try_number(
+        &mut self,
+        expected: &Dict,
+        actual: &mut Dict,
+        key: &str,
+        reason: &str,
+        allowed: impl FnOnce(Real, Real) -> Result<Real, String>,
+    ) {
         let a = number(expected, key);
         let b = number(actual, key);
         let error = (a - b).abs();
         if exceeds_default(a, b, a.abs().max(b.abs())) {
-            let bound = allowed(a, b);
+            let bound = match allowed(a, b) {
+                Ok(bound) => bound,
+                Err(message) => {
+                    self.failure
+                        .get_or_insert_with(|| format!("{key}: {message}"));
+                    return;
+                }
+            };
             if !(self.drift || error <= bound) {
                 self.failure.get_or_insert_with(|| {
                     format!("{key}: {error:.6e} exceeds {bound:.6e} ({reason})")
@@ -483,7 +502,7 @@ impl DerivedChecks<'_> {
     }
 
     fn repeated_point(
-        &self,
+        &mut self,
         expected: &Dict,
         actual: &mut Dict,
         key: &str,
@@ -491,10 +510,15 @@ impl DerivedChecks<'_> {
     ) -> bool {
         let a = vector3(field(expected, key));
         let b = vector3(field(actual, key));
-        if self.drift && [a, b] != source {
+        if [a, b] != source {
+            self.failure.get_or_insert_with(|| {
+                format!(
+                    "{key}: repeated point differs from its source: {:?} != {source:?}",
+                    [a, b]
+                )
+            });
             return false;
         }
-        assert_eq!([a, b], source, "{} {key}", self.id);
         let scale = magnitude(a).max(magnitude(b));
         let needs_check = [(a.x, b.x), (a.y, b.y), (a.z, b.z)]
             .into_iter()
@@ -550,8 +574,13 @@ impl DerivedChecks<'_> {
             let a = dict(a);
             let b = fields_mut(b);
             if integer(field(a, "kind")) == 1 && integer(field(b, "kind")) == 1 {
-                let expected_contact = expected_touches.next().unwrap();
-                let actual_contact = actual_touches.next().unwrap();
+                let (Some(expected_contact), Some(actual_contact)) =
+                    (expected_touches.next(), actual_touches.next())
+                else {
+                    self.failure
+                        .get_or_insert_with(|| "pitch mark has no touchdown contact".into());
+                    break;
+                };
                 for key in ["start", "end"] {
                     checked_marks |=
                         self.repeated_point(a, b, key, [expected_contact, actual_contact]);
@@ -595,10 +624,12 @@ fn height_crossing_bound(
     world: &World<'_>,
     height: Real,
     carry: Real,
-) -> Real {
+) -> Result<Real, String> {
     let ground = world.ground();
     let air = world.air_mean(input.ball_position());
-    let launch = stroke::nominal_shot(input, world).launch.unwrap();
+    let launch = stroke::nominal_shot(input, world)
+        .launch
+        .ok_or("nominal shot has no launch")?;
     let ball = sim::standard_ball();
     let rounding = FlightHeightRounding {
         air: &air,
@@ -609,13 +640,18 @@ fn height_crossing_bound(
     let crossing = |height, air: &dyn AirSampler| {
         sim::carry_to_height(&launch, &ball, world.clock_s(), air, ground, height)
     };
-    assert_eq!(crossing(height, &rounding), carry);
+    let replayed = crossing(height, &rounding);
+    if replayed != carry {
+        return Err(format!(
+            "preview carry {carry:.9} m differs from its independent replay {replayed:.9} m"
+        ));
+    }
     // Each flight step stores a new height in a vector. The crossing distance depends
     // on the descent slope, so measure its sensitivity by moving the crossing plane.
     let dy = rounding.height_error.get() + SINGLE_STEP * height.abs().max(1.0);
-    (crossing(height - dy, &air) - carry)
+    Ok((crossing(height - dy, &air) - carry)
         .abs()
-        .max((crossing(height + dy, &air) - carry).abs())
+        .max((crossing(height + dy, &air) - carry).abs()))
 }
 
 // Independently check the computation-specific bounds before projecting those values
@@ -636,20 +672,54 @@ pub(in crate::corpus) fn verify_delivery(
     case: &Dict,
     actual: &Variant,
     course: Option<&Course>,
+    limits: &crate::tolerance::Layer,
 ) -> Result<(), String> {
+    use crate::corpus::physics::impact::{compare_launch_rounding, verify_strike_rounding};
+
     let args = dict(field(case, "input"));
     let world = crate::corpus::world::world(dict(field(args, "world")), course);
     let input = stroke_input(dict(field(args, "input")));
     let request = impact_request(&input, execution(dict(field(args, "execution"))), true);
-    fn launch(value: &Variant) -> &Dict {
-        dict(field(dict(field(dict(value), "playback")), "launch"))
+    fn launch(value: &Variant) -> &Variant {
+        field(dict(field(dict(value), "playback")), "launch")
     }
-    crate::corpus::physics::impact::verify_strike_rounding(
-        launch(field(case, "output")),
-        launch(actual),
+    let expected = field(case, "output");
+    let reference_launch = launch(expected);
+    let mut computed = dict(launch(actual)).clone();
+    verify_strike_rounding(dict(reference_launch), &computed, &request, world.ground())?;
+    compare_launch_rounding(
+        case,
+        dict(reference_launch),
+        &mut computed,
         &request,
         world.ground(),
-    )
+        false,
+    )?;
+    let mut checks = DerivedChecks {
+        id: field(case, "id").as_str().unwrap(),
+        drift: false,
+        failure: None,
+    };
+    checks.launch(dict(reference_launch), &mut computed, false);
+    if let Some(failure) = checks.failure {
+        return Err(failure);
+    }
+    if let Some(field) = limits.checkpoint_difference(
+        reference_launch,
+        &Variant::Dict(computed),
+        "playback.launch",
+    ) {
+        return Err(format!("playback.launch.{field} exceeds output row"));
+    }
+    for key in ["fault", "quality", "fat"] {
+        if limits
+            .checkpoint_difference(field(dict(expected), key), field(dict(actual), key), key)
+            .is_some()
+        {
+            return Err(format!("{key} exceeds output row"));
+        }
+    }
+    Ok(())
 }
 
 fn check_derived_fields(
@@ -730,7 +800,7 @@ fn check_derived_fields(
                     },
                 ),
             ] {
-                checks.number(
+                checks.try_number(
                     expected,
                     actual,
                     key,
@@ -790,9 +860,151 @@ pub(in crate::corpus) fn run_with_model(
     Ok(outcome)
 }
 
+pub(in crate::corpus) fn replay_from_launch(
+    case: &Dict,
+    course: Option<&Course>,
+    versions: crate::corpus::physics::models::Versions,
+    launch: &Launch,
+    checkpoint: Option<Checkpoint>,
+) -> Result<crate::tolerance::CaseOutcome, String> {
+    use crate::tolerance::CaseOutcome;
+
+    let args = dict(field(case, "input"));
+    let world = crate::corpus::world::world(dict(field(args, "world")), course);
+    let input = stroke_input(dict(field(args, "input")));
+    let execution = execution(dict(field(args, "execution")));
+    let mut outcome = versions.run(|probe| {
+        let result = stroke::play_with_simulation(
+            &input,
+            execution,
+            &world,
+            probe,
+            |request, air, ground, probe| match checkpoint {
+                Some(checkpoint) => integrator::run_with_checkpoint(
+                    launch,
+                    &request.ball,
+                    air,
+                    ground,
+                    request.cup,
+                    Options {
+                        time_s: request.time_s,
+                        ..Options::default()
+                    },
+                    checkpoint,
+                ),
+                None => Some(sim::simulate_launch(
+                    launch,
+                    &request.ball,
+                    request.time_s,
+                    air,
+                    ground,
+                    request.cup,
+                    true,
+                    probe,
+                )),
+            },
+        )
+        .ok_or("checkpoint unavailable in the core replay")?;
+        Ok(stroke_snapshot(&result))
+    })?;
+    if let CaseOutcome::Compared { actual, .. } = &mut outcome {
+        let mut checks = DerivedChecks {
+            id: field(case, "id").as_str().unwrap(),
+            drift: false,
+            failure: None,
+        };
+        let expected = dict(field(case, "output"));
+        let actual = fields_mut(actual);
+        let mut interpreted = std::mem::replace(actual.get_mut("outcome").unwrap(), Variant::Nil);
+        checks.outcome(
+            dict(field(expected, "outcome")),
+            fields_mut(&mut interpreted),
+            dict(field(expected, "playback")),
+            dict(field(actual, "playback")),
+        );
+        *actual.get_mut("outcome").unwrap() = interpreted;
+        if let Some(failure) = checks.failure {
+            return Err(failure);
+        }
+    }
+    Ok(outcome)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mismatched_repeated_point_is_a_case_failure() {
+        let expected = record!(rest: vector(Vec3::ZERO));
+        let mut actual = record!(rest: vector(Vec3::new(1.0, 0.0, 0.0)));
+        for drift in [false, true] {
+            let mut checks = DerivedChecks {
+                id: "synthetic",
+                drift,
+                failure: None,
+            };
+            assert!(!checks.repeated_point(
+                dict(&expected),
+                fields_mut(&mut actual),
+                "rest",
+                [Vec3::ZERO; 2],
+            ));
+            assert!(
+                checks
+                    .failure
+                    .unwrap()
+                    .contains("rest: repeated point differs")
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_preview_carry_must_match_its_independent_replay() {
+        let ball = BallLie::on(Surface::Fairway, Sit::Normal, Vec3::ZERO);
+        let world = World::practice(
+            golf_sim_physics::plane::PlaneGround::default(),
+            ConstantAir::new(sim::standard_air()),
+            ball,
+            None,
+            0.0,
+        );
+        let aim = Vec3::new(0.0, 0.0, -1.0);
+        let club = ClubId::Driver;
+        let address = stroke::stock(club);
+        let lie = world.address_lie(ball, &stroke::footprint(club, &address), aim);
+        let input = StrokeInput::new(
+            DeliveryInput {
+                club,
+                address,
+                lie,
+                attempt_seed: Seed(1),
+            },
+            aim,
+        );
+        let carry = stroke::preview(&input, &world, None, None).carry_m;
+        assert!(height_crossing_bound(&input, &world, 0.0, carry).is_ok());
+        let expected = record!(carry_m: carry);
+        let mut actual = record!(carry_m: carry + 1.0);
+        let mut checks = DerivedChecks {
+            id: "synthetic",
+            drift: false,
+            failure: None,
+        };
+        checks.try_number(
+            dict(&expected),
+            fields_mut(&mut actual),
+            "carry_m",
+            "descent crossing",
+            |_, carry| height_crossing_bound(&input, &world, 0.0, carry),
+        );
+        assert!(
+            checks
+                .failure
+                .unwrap()
+                .starts_with("carry_m: preview carry")
+        );
+    }
 
     #[test]
     fn derived_bound_failure_retains_the_computed_value_and_reason() {

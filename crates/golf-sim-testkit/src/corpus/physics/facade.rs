@@ -857,19 +857,86 @@ pub(in crate::corpus) fn verify_delivery(
     case: &Dict,
     actual: &Variant,
     course: Option<&Course>,
+    limits: &crate::tolerance::Layer,
 ) -> Result<(), String> {
     let input = dict(field(case, "input"));
     let request = request(dict(field(input, "request")));
     let ground = ground(dict(field(input, "ground")), course);
-    let launch = |output: &Variant| -> Result<(), String> {
-        super::impact::verify_strike_rounding(
-            dict(field(dict(field(case, "output")), "launch")),
-            dict(field(dict(output), "launch")),
-            &request,
-            &*ground,
-        )
+    let expected = field(dict(field(case, "output")), "launch");
+    let mut actual = dict(field(dict(actual), "launch")).clone();
+    super::impact::verify_strike_rounding(dict(expected), &actual, &request, &*ground)?;
+    super::impact::compare_launch_rounding(
+        case,
+        dict(expected),
+        &mut actual,
+        &request,
+        &*ground,
+        false,
+    )?;
+    limits
+        .checkpoint_difference(expected, &Variant::Dict(actual), "launch")
+        .map_or(Ok(()), |field| {
+            Err(format!("launch.{field} exceeds output row"))
+        })
+}
+
+pub(in crate::corpus) fn replay_checkpoint(
+    case: &Dict,
+    course: Option<&Course>,
+    recorded: Option<&Launch>,
+    checkpoint: golf_sim_physics::integrator::Checkpoint,
+) -> Result<Variant, String> {
+    use golf_sim_physics::integrator::{self, Options};
+
+    let input = dict(field(case, "input"));
+    let arg = |key| dict(field(input, key));
+    let air = conditions(arg("conditions"));
+    let ground = ground(arg("ground"), course);
+    let mut options = Options {
+        playback: bool_field(input, "playback"),
+        ..Options::default()
     };
-    launch(actual)
+    let (launch, ball, cup) = match field(case, "call").as_str().unwrap() {
+        "golf_sim.simulate_shot" => {
+            let request = request(arg("request"));
+            options.time_s = request.time_s;
+            (
+                *recorded.ok_or("missing recorded launch")?,
+                request.ball,
+                request.cup,
+            )
+        }
+        "golf_sim.simulate_launch" => {
+            options.time_s = number(input, "time_s");
+            (
+                launch(arg("launch")),
+                ball(arg("ball")),
+                cup(field(input, "cup")),
+            )
+        }
+        "shot_integrator.run" => {
+            options.time_s = number(input, "t0");
+            options.release = bool_field(input, "drop");
+            options.step_scale = number(input, "step_scale");
+            (
+                launch(arg("launch")),
+                ball(arg("ball")),
+                cup(field(input, "cup")),
+            )
+        }
+        _ => return Err("case does not integrate a shot".into()),
+    };
+    let shot =
+        integrator::run_with_checkpoint(&launch, &ball, &air, &*ground, cup, options, checkpoint)
+            .ok_or("checkpoint unavailable in the core replay")?;
+    let context = super::trajectory::FlightContext {
+        ball: &ball,
+        air: &air,
+        ground: &*ground,
+        t0: options.time_s,
+        dt: golf_sim_physics::tunables::FLIGHT_DT * options.step_scale,
+    };
+    Ok(compare_trajectory(case, &shot, context, false))
 }
 
 pub(in crate::corpus) fn replay(
@@ -877,6 +944,16 @@ pub(in crate::corpus) fn replay(
     course: Option<&Course>,
     probe: &mut impl Probe,
     drift: bool,
+) -> Result<Variant, String> {
+    replay_with_launch(case, course, probe, drift, None)
+}
+
+pub(in crate::corpus) fn replay_with_launch(
+    case: &Dict,
+    course: Option<&Course>,
+    probe: &mut impl Probe,
+    drift: bool,
+    recorded: Option<&Launch>,
 ) -> Result<Variant, String> {
     let call = field(case, "call")
         .as_str()
@@ -933,13 +1010,22 @@ pub(in crate::corpus) fn replay(
                 }
                 "simulate_shot" => {
                     let request = request(arg("request"));
-                    let result = sim::simulate_shot(
-                        &request,
-                        &conditions,
-                        &*ground,
-                        bool_field(input, "playback"),
-                        probe,
-                    );
+                    let playback = bool_field(input, "playback");
+                    let result = match recorded {
+                        Some(launch) => sim::simulate_launch(
+                            launch,
+                            &request.ball,
+                            request.time_s,
+                            &conditions,
+                            &*ground,
+                            request.cup,
+                            playback,
+                            probe,
+                        ),
+                        None => {
+                            sim::simulate_shot(&request, &conditions, &*ground, playback, probe)
+                        }
+                    };
                     let context = super::trajectory::FlightContext {
                         ball: &request.ball,
                         air: &conditions,
@@ -948,7 +1034,9 @@ pub(in crate::corpus) fn replay(
                         dt: golf_sim_physics::tunables::FLIGHT_DT,
                     };
                     let mut shot = compare_trajectory(case, &result, context, drift);
-                    if let Variant::Dict(actual) = &mut shot {
+                    if recorded.is_none()
+                        && let Variant::Dict(actual) = &mut shot
+                    {
                         super::impact::compare_shot_launch(
                             dict(field(case, "output")),
                             actual,
