@@ -389,7 +389,7 @@ impl FixtureRun {
             Runner::PhysicsStrokes => physics::strokes(case, course, drift)?,
             Runner::WorldConstant => world::replay(case, course, shared_ground, drift)?,
             Runner::StrokeDelivery => stroke::delivery::run(case),
-            Runner::StrokeFacade => stroke::facade(case, course, drift),
+            Runner::StrokeFacade => stroke::facade(case, course, drift)?,
             Runner::SwingStreams => swing::run(case),
             Runner::RulesTransitions => rules::run(case, drift)?,
             Runner::MathPrims

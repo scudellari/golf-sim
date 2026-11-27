@@ -16,11 +16,11 @@ use golf_sim_physics::{
     facade as sim,
     plane::ConstantAir,
     samplers::{AirSample, AirSampler, GroundSampler},
-    values::{Launch, ShotResult},
+    values::{Launch, ShotRequest, ShotResult},
 };
 use golf_sim_stroke::{
     address::{Address, Assists},
-    delivery::DeliveryInput,
+    delivery::{self, DeliveryInput},
     results::{DropResult, Preview, StrokeResult},
     stroke::{self, StrokeInput},
 };
@@ -620,7 +620,20 @@ fn height_crossing_bound(
 
 // Independently check the computation-specific bounds before projecting those values
 // to the fixture. All other values, including the operands, keep their table bounds.
-fn check_derived_fields(case: &Dict, world: &World<'_>, actual: &mut Variant, drift: bool) {
+fn impact_request(input: &StrokeInput, execution: Execution, with_noise: bool) -> ShotRequest {
+    let built = delivery::build(&input.delivery, execution, with_noise, &mut NoProbe);
+    let mut request = ShotRequest::new(built.club, sim::standard_ball(), built.delivery, built.lie);
+    request.position = input.ball_position();
+    request.aim = input.aim;
+    request
+}
+
+fn check_derived_fields(
+    case: &Dict,
+    world: &World<'_>,
+    actual: &mut Variant,
+    drift: bool,
+) -> Result<(), String> {
     let checks = DerivedChecks {
         id: field(case, "id").as_str().unwrap(),
         drift,
@@ -628,7 +641,20 @@ fn check_derived_fields(case: &Dict, world: &World<'_>, actual: &mut Variant, dr
     let expected = dict(field(case, "output"));
     let actual = fields_mut(actual);
     match field(case, "call").as_str().unwrap() {
-        "stroke.launch" => checks.launch(expected, actual, true),
+        "stroke.launch" => {
+            let args = dict(field(case, "input"));
+            let input = stroke_input(dict(field(args, "input")));
+            let request = impact_request(&input, execution(dict(field(args, "execution"))), true);
+            crate::corpus::physics::impact::compare_launch_rounding(
+                case,
+                expected,
+                actual,
+                &request,
+                world.ground(),
+                drift,
+            )?;
+            checks.launch(expected, actual, true);
+        }
         "stroke.play" => {
             let expected_shot = dict(field(expected, "playback"));
             let mut outcome = std::mem::replace(actual.get_mut("outcome").unwrap(), Variant::Nil);
@@ -672,12 +698,17 @@ fn check_derived_fields(case: &Dict, world: &World<'_>, actual: &mut Variant, dr
         }
         _ => {}
     }
+    Ok(())
 }
 
-pub(in crate::corpus) fn run(case: &Dict, course: Option<&Course>, drift: bool) -> Variant {
+pub(in crate::corpus) fn run(
+    case: &Dict,
+    course: Option<&Course>,
+    drift: bool,
+) -> Result<Variant, String> {
     let args = dict(field(case, "input"));
     let world = crate::corpus::world::world(dict(field(args, "world")), course);
     let mut actual = replay(case, &world);
-    check_derived_fields(case, &world, &mut actual, drift);
-    actual
+    check_derived_fields(case, &world, &mut actual, drift)?;
+    Ok(actual)
 }

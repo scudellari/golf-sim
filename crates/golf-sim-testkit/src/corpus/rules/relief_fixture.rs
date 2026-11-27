@@ -133,7 +133,7 @@ pub(in crate::corpus) fn project(
                     return Ok((output.clone(), Variant::Nil));
                 }
                 let course = fixture.resolve_course(case)?;
-                let actual = stroke::facade(case, course.as_deref(), drift);
+                let actual = stroke::facade(case, course.as_deref(), drift)?;
                 return Ok((stroke_positions(output), stroke_positions(&actual)));
             }
 

@@ -11,7 +11,8 @@ use golf_sim_physics::{
     impact,
     plane::PlaneGround,
     samplers::{AirSample, GroundSample, GroundSampler},
-    strike,
+    strike::{self, PreImpact},
+    tunables as t,
     values::{BallSpec, ClubCategory, ClubSpec, Contact, Delivery, Launch, Lie, ShotRequest},
 };
 
@@ -329,23 +330,233 @@ struct StrikeBounds {
     spin: [Real; 3],
 }
 
+#[derive(Clone, Copy)]
+struct CollisionFrame<'a> {
+    request: &'a ShotRequest,
+    pre: PreImpact,
+    head: impact::Head,
+    approach: Vec3,
+    temperature: Real,
+}
+
+#[derive(Default)]
+struct CollisionBounds {
+    error: StrikeBounds,
+    velocity: Vec3,
+    spin: Vec3,
+}
+
 fn strike_bounds(
     request: &ShotRequest,
     ground: &(impl GroundSampler + ?Sized),
     launch: &Dict,
 ) -> StrikeBounds {
+    const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+    let aim = Vec3::new(request.aim.x, 0.0, request.aim.z).normalized();
+    let right = aim.cross(UP);
+    let delivery = &request.delivery;
+    let pre = strike::before_ball(request, aim, right, ground);
+    let frame = CollisionFrame {
+        request,
+        pre,
+        head: impact::head_orientation(&request.club, delivery, aim, right, pre.face_close_rad),
+        approach: (aim * fm::cos(delivery.path_rad) + right * fm::sin(delivery.path_rad))
+            * fm::cos(delivery.attack_rad)
+            + UP * fm::sin(delivery.attack_rad),
+        temperature: number(launch, "ball_temperature_c"),
+    };
+    let contact = integer(launch, "contact");
+    let up = number(launch, "strike_up_m");
+    let toe = number(launch, "strike_toe_m");
+    let height = request.ball.radius_m + request.lie.ball_height_m;
+    if pre.sand_fraction * pre.sand_blend > 0.0 {
+        return frame
+            .bunker_bounds(launch, height, toe, up, contact)
+            .unwrap_or_default();
+    }
+    collision(
+        frame,
+        height,
+        toe,
+        up,
+        contact,
+        Some(vec3(launch, "velocity")),
+    )
+    .error
+}
+
+impl CollisionFrame<'_> {
+    fn face_height(self, center_y: Real, sole_y: Real, toe: Real) -> Option<Real> {
+        let club = &self.request.club;
+        if toe.abs() > club.face_half_width_m {
+            return None;
+        }
+        let roll = if club.roll_radius_m > 0.0 {
+            1.0 / club.roll_radius_m
+        } else {
+            0.0
+        };
+        let bulge = if club.bulge_radius_m > 0.0 {
+            1.0 / club.bulge_radius_m
+        } else {
+            0.0
+        };
+        let bottom = -club.face_center_height_m;
+        let top = club.face_height_m + bottom;
+        let head = self.head;
+        let derivative = head.face_up.y.abs()
+            - roll
+                * (bottom.abs().max(top.abs()) * head.normal.y.abs() + self.request.ball.radius_m);
+        if derivative <= 0.0 {
+            return None;
+        }
+        let sag = |u: Real, x: Real| 0.5 * (u * u * roll + x * x * bulge);
+        let leading_y = head.face_up.y * bottom - head.normal.y * sag(bottom, 0.0);
+        let residual = |u| {
+            let normal =
+                (head.normal + head.face_up * (u * roll) + head.toe * (toe * bulge)).normalized();
+            center_y
+                - normal.y * self.request.ball.radius_m
+                - (head.face_up.y * u + head.toe.y * toe - head.normal.y * sag(u, toe))
+                + leading_y
+                - sole_y
+        };
+        let (mut lo, mut hi) = (bottom, top);
+        let sign = residual(lo).signum();
+        if residual(hi).signum() == sign {
+            return None;
+        }
+        for _ in 0..48 {
+            let mid = 0.5 * (lo + hi);
+            if residual(mid).signum() == sign {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Some(0.5 * (lo + hi))
+    }
+
+    fn bunker_bounds(
+        self,
+        launch: &Dict,
+        center_y: Real,
+        toe: Real,
+        up: Real,
+        contact: usize,
+    ) -> Option<StrikeBounds> {
+        const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+        let pre = self.pre;
+        let face = Contact::Face as usize;
+        if contact != face || self.request.club.category == ClubCategory::Driver {
+            return None;
+        }
+        let direct_up = self.face_height(center_y, pre.sole_height_m, toe)?;
+        if (direct_up - up).abs() > 1e-12 {
+            return None;
+        }
+        let direct = collision(self, center_y, toe, direct_up, face, None);
+
+        let supported_y = self.request.ball.radius_m + self.request.lie.ball_height_m.max(0.0);
+        let sole_y = pre.sole_height_m.max(0.0);
+        let supported_up = self.face_height(supported_y, sole_y, toe)?;
+        let supported_frame = Self {
+            pre: PreImpact {
+                club_speed_mps: pre.club_speed_mps,
+                ..PreImpact::default()
+            },
+            ..self
+        };
+        let supported = collision(supported_frame, supported_y, toe, supported_up, face, None);
+
+        let speed = supported.velocity.length();
+        let speed_error = supported.error.velocity;
+        if speed <= speed_error || speed_error == 0.0 || direct.error.velocity == 0.0 {
+            return None;
+        }
+        let step = Real::from(f32::EPSILON);
+        let weight = t::SAND_FACE_WEIGHT;
+        let direction = supported
+            .velocity
+            .normalized()
+            .lerp(self.head.normal, weight)
+            + UP * (fm::sin(pre.sand_bounce_rad) * t::SAND_BOUNCE_LAUNCH_GAIN);
+        let direction_error =
+            (1.0 - weight) * 2.0 * speed_error / speed + 8.0 * step * (1.0 + direction.length());
+        if direction.length() <= direction_error {
+            return None;
+        }
+        let keep_speed = 1.0 - t::SAND_OPEN_SPEED_LOSS * pre.sand_opening;
+        let keep_spin = t::SAND_SPIN_KEEP * (1.0 - t::SAND_OPEN_SPIN_LOSS * pre.sand_opening);
+        let splash_velocity = direction.normalized() * (speed * keep_speed);
+        let splash_error =
+            keep_speed.abs() * (speed_error + 2.0 * speed * direction_error / direction.length());
+        let fraction = pre.sand_fraction;
+        let blend = pre.sand_blend;
+        let access = golf_sim_base::num::lerpf(pre.direct_sand_access, 1.0, fraction);
+        let transfer = pre.sand_transfer * access;
+        let sand_velocity = supported.velocity.lerp(splash_velocity, fraction) * transfer;
+        let sand_spin = supported.spin.lerp(supported.spin * keep_spin, fraction)
+            * transfer
+            * pre.sand_spin_transfer;
+        let velocity = direct.velocity.lerp(sand_velocity, blend);
+        let spin = direct.spin.lerp(sand_spin, blend);
+        if (vec3(launch, "velocity") - velocity).length() > 1e-10 * velocity.length().max(1.0)
+            || (vec3(launch, "spin") - spin).length() > 1e-10 * spin.length().max(1.0)
+        {
+            return None;
+        }
+
+        // The two contact branches have different errors and different spin and speed weights.
+        let mix_error = |direct_error, supported_error, splash_error, transfer| {
+            (1.0 - blend) * direct_error
+                + blend * transfer * ((1.0 - fraction) * supported_error + fraction * splash_error)
+        };
+        let velocity = mix_error(direct.error.velocity, speed_error, splash_error, transfer)
+            + 8.0 * step * (direct.velocity.length() + sand_velocity.length());
+        let sand_spin_components = [sand_spin.x, sand_spin.y, sand_spin.z];
+        let direct_spin_components = [direct.spin.x, direct.spin.y, direct.spin.z];
+        let spin = std::array::from_fn(|i| {
+            let clean = supported.error.spin[i];
+            mix_error(
+                direct.error.spin[i],
+                clean,
+                clean * keep_spin.abs(),
+                transfer * pre.sand_spin_transfer,
+            ) + 8.0 * step * (direct_spin_components[i].abs() + sand_spin_components[i].abs())
+        });
+        Some(StrikeBounds {
+            velocity,
+            spin,
+            ..direct.error
+        })
+    }
+}
+
+fn collision(
+    frame: CollisionFrame<'_>,
+    center_y: Real,
+    actual_toe: Real,
+    up: Real,
+    contact: usize,
+    reported_velocity: Option<Vec3>,
+) -> CollisionBounds {
     use golf_sim_base::Basis;
-    use golf_sim_physics::tunables as t;
 
     const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
+    let CollisionFrame {
+        request,
+        pre,
+        head,
+        approach,
+        temperature,
+    } = frame;
     let club = &request.club;
     let ball = &request.ball;
     let delivery = &request.delivery;
     let step = Real::from(f32::EPSILON);
-    let aim = Vec3::new(request.aim.x, 0.0, request.aim.z).normalized();
-    let right = aim.cross(UP);
-    let contact = integer(launch, "contact");
+    let toe = delivery.strike_toe_m;
     if ![
         Contact::Face,
         Contact::LeadingEdge,
@@ -355,16 +566,8 @@ fn strike_bounds(
     .into_iter()
     .any(|kind| contact == kind as usize)
     {
-        return StrikeBounds::default();
+        return CollisionBounds::default();
     }
-    let pre = strike::before_ball(request, aim, right, ground);
-    if pre.sand_fraction * pre.sand_blend > 0.0 {
-        return StrikeBounds::default();
-    }
-    let head = impact::head_orientation(club, delivery, aim, right, pre.face_close_rad);
-    let toe = delivery.strike_toe_m;
-    let up = number(launch, "strike_up_m");
-    let actual_toe = number(launch, "strike_toe_m");
     let curvature = |radius| if radius > 0.0 { 1.0 / radius } else { 0.0 };
     let roll = curvature(club.roll_radius_m);
     let bulge = curvature(club.bulge_radius_m);
@@ -375,14 +578,10 @@ fn strike_bounds(
         head.face_up * up + head.toe * toe
             - head.normal * (0.5 * (up * up * roll + toe * toe * bulge))
     };
-    let center_y = ball.radius_m + request.lie.ball_height_m;
     let origin_y = request.position.y;
     let local_scale =
         center_y.abs() + ball.radius_m + up.abs() + toe.abs() + club.face_center_height_m;
     let dy = (round_height(origin_y, center_y) - center_y).abs() + 8.0 * step * local_scale;
-    let approach = (aim * fm::cos(delivery.path_rad) + right * fm::sin(delivery.path_rad))
-        * fm::cos(delivery.attack_rad)
-        + UP * fm::sin(delivery.attack_rad);
 
     let (normal, dn, dup, edge_distance, offset_error) = if contact == Contact::Face as usize {
         let face_limit = club
@@ -391,13 +590,13 @@ fn strike_bounds(
         let derivative =
             head.face_up.y.abs() - roll * (face_limit * head.normal.y.abs() + ball.radius_m);
         if derivative <= 0.0 {
-            return StrikeBounds::default();
+            return CollisionBounds::default();
         }
         let dup = dy / derivative;
         if up - dup < -club.face_center_height_m
             || up + dup > club.face_height_m - club.face_center_height_m
         {
-            return StrikeBounds::default();
+            return CollisionBounds::default();
         }
         (
             face_normal(up),
@@ -416,18 +615,18 @@ fn strike_bounds(
         for _ in 0..6 {
             let derivative = (sole(tangent_up + 0.0001) - sole(tangent_up - 0.0001)) / 0.0002;
             if derivative.abs() <= 1e-5 {
-                return StrikeBounds::default();
+                return CollisionBounds::default();
             }
             tangent_up += (pre.sole_height_m - sole(tangent_up)) / derivative;
         }
         let derivative = head.face_up.y.abs()
             - roll * ((tangent_up.abs() + ball.radius_m) * head.normal.y.abs() + ball.radius_m);
         if derivative <= 0.0 {
-            return StrikeBounds::default();
+            return CollisionBounds::default();
         }
         let dup = (dy + (pre.sole_height_m - sole(tangent_up)).abs()) / derivative;
         if dup > ball.radius_m {
-            return StrikeBounds::default();
+            return CollisionBounds::default();
         }
         let to_edge = face_normal(tangent_up) * ball.radius_m + offset(toe, tangent_up)
             - offset(actual_toe, up);
@@ -437,7 +636,7 @@ fn strike_bounds(
         let dperp = world_error + dup * (1.0 + roll * (ball.radius_m + tangent_up.abs() + dup));
         let dc = dperp * (2.0 * perpendicular.length() + dperp);
         if chord2 <= dc {
-            return StrikeBounds::default();
+            return CollisionBounds::default();
         }
         let chord = fm::sqrt(chord2);
         let droot = dc / (chord + fm::sqrt(chord2 - dc));
@@ -487,7 +686,6 @@ fn strike_bounds(
             Vec3::new(x.z, y.z, z.z),
         ],
     };
-    let velocity = vec3(launch, "velocity");
     let incoming = -approach * (pre.club_speed_mps * (1.0 + toe / club.arc_radius_m));
     let speed = incoming.length();
     let un = incoming.dot(normal);
@@ -514,8 +712,7 @@ fn strike_bounds(
         - (1.0 - t::EDGE_COR_FACTOR)
             * golf_sim_base::num::smoothstep(0.0, t::EDGE_COR_BLEND_M, edge_distance);
     let restitution = ((e * contact_cor
-        + t::COR_PER_DEGREE_C
-            * (number(launch, "ball_temperature_c") - t::COR_TEMPERATURE_REFERENCE_C))
+        + t::COR_PER_DEGREE_C * (temperature - t::COR_TEMPERATURE_REFERENCE_C))
         * edge_cor
         * (1.0 - pre.cushion * t::INTERFERENCE_COR_LOSS))
         .clamp(0.05, 0.95);
@@ -553,8 +750,8 @@ fn strike_bounds(
     let dj_n = impulse_error + unconstrained.length() * dn;
     let cone_error = impulse_error + (1.0 + mu.abs()) * dj_n + jn.abs() * dn;
     let cone_margin = mu * jn - tangent.length();
-    let dv = if jn > dj_n && cone_margin > cone_error {
-        impulse_error / ball.mass_kg
+    let (impulse, dv) = if jn > dj_n && cone_margin > cone_error {
+        (unconstrained, impulse_error / ball.mass_kg)
     } else if cone_margin < -cone_error && slip.length() > dslip {
         let dir = normal - slip.normalized() * mu;
         let ddir = dn + mu.abs() * 2.0 * dslip / slip.length();
@@ -563,21 +760,30 @@ fn strike_bounds(
         let a = -(1.0 + restitution) * un;
         let da = (1.0 + restitution) * dun + (un.abs() + dun) * de;
         if denominator <= db {
-            return StrikeBounds::default();
+            return CollisionBounds::default();
         }
         let quotient = a / denominator;
         let dq = (da + quotient.abs() * db) / (denominator - db);
-        (dir.length() * dq + (quotient.abs() + dq) * ddir) / ball.mass_kg
+        (
+            dir * quotient,
+            (dir.length() * dq + (quotient.abs() + dq) * ddir) / ball.mass_kg,
+        )
     } else {
-        return StrikeBounds {
-            normal: dn,
-            face_up: dup,
-            ..StrikeBounds::default()
+        return CollisionBounds {
+            error: StrikeBounds {
+                normal: dn,
+                face_up: dup,
+                ..StrikeBounds::default()
+            },
+            ..CollisionBounds::default()
         };
     };
+    let computed_velocity = impulse / ball.mass_kg * pre.direct_sand_access * pre.grass_transfer;
+    let computed_spin = rb.cross(impulse) / ib * pre.direct_sand_access * pre.grass_transfer;
+    let velocity = reported_velocity.unwrap_or(computed_velocity);
     let factor = (pre.direct_sand_access * pre.grass_transfer).abs();
     let mut dv = dv * factor + 8.0 * step * velocity.length();
-    if club.category == ClubCategory::Driver {
+    if reported_velocity.is_some() && club.category == ClubCategory::Driver {
         // Clamping the velocity to the smash-limit ball is a nonexpansive projection.
         dv += 4.0 * step * velocity.length();
     }
@@ -597,11 +803,15 @@ fn strike_bounds(
             component / (ball.radius_m * ball.inertia_factor)
         })
         .collect::<Vec<_>>();
-    StrikeBounds {
-        normal: dn,
-        face_up: dup,
-        velocity: dv,
-        spin: [spin[0], spin[1], spin[2]],
+    CollisionBounds {
+        error: StrikeBounds {
+            normal: dn,
+            face_up: dup,
+            velocity: dv,
+            spin: [spin[0], spin[1], spin[2]],
+        },
+        velocity: computed_velocity,
+        spin: computed_spin,
     }
 }
 
@@ -920,6 +1130,67 @@ pub(in crate::corpus) fn compare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bunker_rounding_requires_both_contact_branches_and_the_core_blend() {
+        use golf_sim_base::{ClubId, digest::object, num::deg_to_rad};
+
+        let club = t::standard_club(ClubId::SandWedge);
+        let ball = t::standard_ball();
+        let lie = Lie {
+            surface: Surface::Bunker,
+            sand_firmness: 0.5,
+            ball_height_m: -0.001,
+            ..Lie::default()
+        };
+        let delivery = Delivery {
+            club_speed_mps: 28.0,
+            dynamic_loft_rad: deg_to_rad(48.0),
+            attack_rad: deg_to_rad(-6.0),
+            sole_height_m: -0.003,
+            ..Delivery::default()
+        };
+        let mut request = ShotRequest::new(club, ball, delivery, lie);
+        request.position = Vec3::new(0.0, 256.0, 0.0);
+        request.aim = Vec3::new(0.0, 0.0, -1.0);
+        let ground = PlaneGround::new(
+            GroundSample {
+                surface: Surface::Bunker,
+                ..GroundSample::default()
+            },
+            request.position,
+        );
+        let launch = impact::strike(&request, &AirSample::default(), &ground, &mut NoProbe);
+        assert_eq!(launch.contact, Contact::Face);
+        let actual = launch_output(launch);
+        let actual = dict(&actual);
+        let bounds = strike_bounds(&request, &ground, actual);
+        assert!(bounds.face_up > 2e-6);
+        assert!(bounds.velocity > 0.002);
+
+        let case = object([("id", "bunker-blend".into())]);
+        let mut reference = actual.clone();
+        let shifted = launch.velocity + Vec3::new(0.0, 0.002, 0.0);
+        *reference.get_mut("velocity").unwrap() = vector(shifted);
+        let compare_velocity = |mut computed: Dict| {
+            compare_launch_rounding(
+                dict(&case),
+                &reference,
+                &mut computed,
+                &request,
+                &ground,
+                false,
+            )
+            .unwrap();
+            vec3(&computed, "velocity")
+        };
+        assert_eq!(compare_velocity(actual.clone()), shifted);
+
+        let mut wrong_core = actual.clone();
+        let mutated = launch.velocity + Vec3::new(0.0, -0.002, 0.0);
+        *wrong_core.get_mut("velocity").unwrap() = vector(mutated);
+        assert_eq!(compare_velocity(wrong_core), mutated);
+    }
 
     #[test]
     fn the_reference_divot_sampler_rounds_plan_coordinates_before_the_edge_test() {
