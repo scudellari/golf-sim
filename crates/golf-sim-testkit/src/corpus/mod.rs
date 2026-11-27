@@ -22,6 +22,7 @@ use golf_sim_base::{
     variant::{Dict, Variant},
 };
 
+use golf_sim_conditions::grounds::CourseGround;
 use golf_sim_course::course::Course;
 
 use crate::tolerance::{self, CaseOutcome, CheckReport, Departures, DriftReport, Fixture};
@@ -309,7 +310,10 @@ impl FixtureRun {
     }
 
     fn primary_course(&mut self, header: &Dict) -> Option<Arc<Course>> {
-        if !matches!(self.runner, Runner::CourseQueries) {
+        if !matches!(
+            self.runner,
+            Runner::CourseQueries | Runner::WorldConstant | Runner::StrokeFacade
+        ) {
             return None;
         }
         let identity = self
@@ -353,6 +357,7 @@ impl FixtureRun {
         let course = resolved.as_deref();
         let prepared = prepared
             .filter(|prepared| course.is_some_and(|course| std::ptr::eq(course, prepared.course)));
+        let shared_ground = prepared.and_then(|prepared| prepared.ground.as_ref());
 
         Ok(match self.runner {
             Runner::Variant => tolerance::variant_snapshot(case)?,
@@ -382,7 +387,7 @@ impl FixtureRun {
             Runner::PhysicsImpact => physics::impact::compare(case, drift)?,
             Runner::PhysicsFacade => physics::facade(case, course),
             Runner::PhysicsStrokes => physics::strokes(case, course)?,
-            Runner::WorldConstant => world::replay(case, course),
+            Runner::WorldConstant => world::replay(case, course, shared_ground, drift)?,
             Runner::StrokeDelivery => stroke::delivery::run(case),
             Runner::StrokeFacade => stroke::facade(case, course, drift),
             Runner::SwingStreams => swing::run(case),
@@ -445,6 +450,7 @@ impl FixtureRun {
 struct PreparedCourse<'a> {
     course: &'a Course,
     queries: Option<course::Queries<'a>>,
+    ground: Option<CourseGround<'a>>,
 }
 
 impl<'a> PreparedCourse<'a> {
@@ -452,6 +458,8 @@ impl<'a> PreparedCourse<'a> {
         Self {
             course,
             queries: (runner == Runner::CourseQueries).then(|| course::Queries::new(course)),
+            ground: (runner == Runner::WorldConstant)
+                .then(|| CourseGround::new(course, 0.5, 0.3, 0.0)),
         }
     }
 }
