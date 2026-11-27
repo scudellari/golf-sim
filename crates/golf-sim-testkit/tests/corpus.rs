@@ -660,17 +660,27 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
         }));
     }
 
-    for (id, corrupt_sibling) in [
-        ("test-course", false),
-        ("unknown-course", false),
-        ("test-course", true),
+    for (id, unreadable_sibling) in [
+        ("test-course", None),
+        ("unknown-course", None),
+        ("test-course", Some("corrupt-revision")),
+        #[cfg(unix)]
+        ("test-course", Some("dangling-revision")),
     ] {
-        if corrupt_sibling {
-            let sibling = parent.join("corrupt-revision");
+        if unreadable_sibling == Some("corrupt-revision") {
+            let sibling = parent.join(unreadable_sibling.unwrap());
             fs::create_dir(&sibling).unwrap();
             fs::write(
                 sibling.join("manifest.json"),
                 br#"{"course_id":"test-course","course_revision":"missing-revision","#,
+            )
+            .unwrap();
+        }
+        #[cfg(unix)]
+        if unreadable_sibling == Some("dangling-revision") {
+            std::os::unix::fs::symlink(
+                parent.join("absent-revision"),
+                parent.join(unreadable_sibling.unwrap()),
             )
             .unwrap();
         }
@@ -693,7 +703,7 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
                 .arg(&parent)
                 .output()
                 .unwrap();
-            if id == "test-course" && !corrupt_sibling {
+            if id == "test-course" && unreadable_sibling.is_none() {
                 assert!(output.status.success(), "{}", text(&output.stderr));
                 let report = text(&output.stdout);
                 assert!(report.contains("modified copy of test-course"));
@@ -701,18 +711,21 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
             } else {
                 assert_eq!(output.status.code(), Some(1));
                 let error = text(&output.stderr);
-                let reason = if corrupt_sibling {
+                let reason = if unreadable_sibling.is_some() {
                     "course inventory could not be read"
                 } else {
                     "course \"unknown-course\" revision \"missing-revision\" was not found"
                 };
                 assert!(error.contains(reason), "{error}");
-                if corrupt_sibling {
-                    assert!(error.contains("corrupt-revision"), "{error}");
+                if let Some(sibling) = unreadable_sibling {
+                    assert!(error.contains(sibling), "{error}");
                     assert!(!error.contains("modified copy"), "{error}");
                 }
                 assert!(error.contains("refusals exceed 1%"));
             }
+        }
+        if unreadable_sibling == Some("corrupt-revision") {
+            fs::remove_dir_all(parent.join(unreadable_sibling.unwrap())).unwrap();
         }
     }
 }

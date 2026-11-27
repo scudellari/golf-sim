@@ -24,7 +24,8 @@ impl Courses {
         let mut explicit_revisions = BTreeMap::<String, BTreeSet<String>>::new();
         let mut errors = BTreeSet::new();
         for root in &roots {
-            let mut inspect = |dir: &Path| match Manifest::read(dir) {
+            let mut inspect = |dir: &Path, errors: &mut BTreeSet<String>| match Manifest::read(dir)
+            {
                 Ok(manifest) => {
                     if explicit.contains(root) {
                         explicit_revisions
@@ -41,9 +42,32 @@ impl Courses {
                 }
             };
             match fs::symlink_metadata(root.join("manifest.json")) {
-                Ok(_) => inspect(root),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => match bundle_dirs(root) {
-                    Ok(dirs) => dirs.iter().map(PathBuf::as_path).for_each(inspect),
+                Ok(_) => inspect(root, &mut errors),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => match fs::read_dir(root) {
+                    Ok(entries) => {
+                        let mut dirs = Vec::new();
+                        for entry in entries {
+                            let entry = match entry {
+                                Ok(entry) => entry,
+                                Err(error) => {
+                                    errors.insert(format!("{}: {error}", root.display()));
+                                    continue;
+                                }
+                            };
+                            let path = entry.path();
+                            match bundle_dir(&path) {
+                                Ok(true) => dirs.push(path),
+                                Ok(false) => {}
+                                Err(error) => {
+                                    errors.insert(format!("{}: {error}", path.display()));
+                                }
+                            }
+                        }
+                        dirs.sort();
+                        for dir in dirs {
+                            inspect(&dir, &mut errors);
+                        }
+                    }
                     Err(error) => {
                         errors.insert(format!("{}: {error}", root.display()));
                     }
@@ -101,17 +125,12 @@ impl Courses {
     }
 }
 
-fn bundle_dirs(root: &Path) -> io::Result<Vec<PathBuf>> {
-    let mut children = Vec::new();
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() || (entry.file_type()?.is_symlink() && entry.path().is_dir())
-        {
-            children.push(entry.path());
-        }
+fn bundle_dir(path: &Path) -> io::Result<bool> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_symlink() {
+        return Ok(fs::metadata(path)?.is_dir());
     }
-    children.sort();
-    Ok(children)
+    Ok(metadata.is_dir())
 }
 
 #[cfg(test)]
