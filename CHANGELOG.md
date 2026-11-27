@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 (2026-11-27)
+
+A stroke plays on a constant day, and a hole plays to the cup. The physics is version 0.11.0, checked against published measurements, and every layer was compared with the earlier implementation within its stated tolerance.
+
+### What is in it
+
+- **The physics.** Flight, ground contact, bounce, roll, the cup, the flagstick, club impact and the stroke integrator, with tunables fitted to measured data. Since the port, three model changes have landed, each scored before and after: the flagstick's rim response, cup capture on slopes, and green bounce across the iron range. A lift cap at high spin was tried and held, because no form passed the rule that a change may not make any target worse.
+- **Validation.** `golf validate` prints the residuals against the measured targets, `golf score` compares two models, and `golf fit` drives the calibration script. The licence ledger lists every dataset.
+- **The course and the world.** Course grids, obstacles, the legal map, the stance footprint, the constant-day world, lies and wear.
+- **A stroke.** The address, the bag, the delivery, `golf stroke`, `golf course check`, stroke traces, `golf explain` and stroke repro bundles.
+- **The swing.** The swing meter's judgment from stamped presses, exact swings, and the provisional `scratch` and `hcp15` skill profiles.
+- **The rules and the hole.** Rulings, prompts, the provisional ball, relief, hole records (format 5), the caddie's advice and the HUD's numbers. `Hole` applies every decision through one function and replays its own records bit for bit.
+- **The program.** `golf play` speaks a JSON-lines protocol (protocol 1, with `golf schema`), `golf replay` names the first entry that diverges, `golf batch` plays holes on parallel threads with the scripted golfer, `golf sweep` reports score distributions over profiles and seeds, and `golf scenario` checks scripted holes against expected results.
+
+The downloads and their checksums are attached to the release, as for 0.1.0.
+
 ## 0.1.0 (2026-11-26)
 
 This is a foundation release. It has no physics. The `golf` program cannot play a stroke, a hole or a round, and most of its commands report that they are not built yet. The Godot library builds but registers no classes.
