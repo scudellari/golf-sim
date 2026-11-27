@@ -1,0 +1,53 @@
+course = "../courses/test-course"
+day = "constant"
+hole = 2
+mode = "caddie"
+seed = 1
+tolerance_m = 0.001
+
+[[actions]]
+
+[actions.stroke]
+aim_at = [455.0, 26.796249389648438, 158.0]
+club = "9iron"
+
+[actions.stroke.address]
+swing_length = 0.8999999999999999
+
+[actions.stroke.swing.exact]
+power = 0.8931186585580765
+strike_m = [0.0, 0.0]
+timing_fault = 0.0
+
+[[actions]]
+
+[actions.stroke]
+aim_at = [388.62842332823107, 25.59156839429098, 247.49835829890424]
+club = "putter"
+
+[actions.stroke.address]
+swing_length = 0.8999999999999999
+
+[actions.stroke.swing.exact]
+power = 0.8577625102179341
+strike_m = [0.0, 0.0]
+timing_fault = 0.0
+
+[expected]
+score = 2
+
+[[expected.strokes]]
+end = "at_rest"
+rest = [461.98068786459146, 25.61290446452988, 179.53185708405718]
+
+[expected.strokes.lie]
+sit = "normal"
+surface = "green"
+
+[[expected.strokes]]
+end = "holed"
+rest = [455.0, 25.579914694824218, 186.0]
+
+[expected.strokes.lie]
+sit = "normal"
+surface = "green"

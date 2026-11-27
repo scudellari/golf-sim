@@ -1,0 +1,94 @@
+course = "../courses/test-course"
+day = "constant"
+hole = 1
+mode = "caddie"
+seed = 1
+tolerance_m = 0.001
+
+[[actions]]
+
+[actions.stroke]
+aim_at = [175.9989479166295, 20.827499389648438, 64.45871076641485]
+club = "driver"
+
+[actions.stroke.swing.exact]
+power = 1.0
+strike_m = [0.0, 0.0]
+timing_fault = 0.0
+
+[[actions]]
+
+[actions.stroke]
+aim_at = [450.9799144178279, 24.890627711308277, 72.78595334011796]
+club = "lw"
+
+[actions.stroke.address]
+swing_length = 0.8999999999999999
+
+[actions.stroke.swing.exact]
+power = 0.878472094966469
+strike_m = [0.0, 0.0]
+timing_fault = 0.0
+
+[[actions]]
+
+[actions.stroke]
+aim_at = [322.0776008215794, 25.949796676167534, 54.23652453811143]
+club = "putter"
+
+[actions.stroke.address]
+swing_length = 0.6999999999999997
+
+[actions.stroke.swing.exact]
+power = 0.6296041038358946
+strike_m = [0.0, 0.0]
+timing_fault = 0.0
+
+[[actions]]
+
+[actions.stroke]
+aim_at = [511.5829943461612, 25.827298300190535, 87.45418864519688]
+club = "putter"
+
+[actions.stroke.address]
+swing_length = 0.4999999999999996
+
+[actions.stroke.swing.exact]
+power = 0.4037841076122855
+strike_m = [0.0, 0.0]
+timing_fault = 0.0
+
+[expected]
+score = 4
+
+[[expected.strokes]]
+end = "at_rest"
+rest = [351.0337609908433, 24.91196596652259, 76.06717493422714]
+
+[expected.strokes.lie]
+sit = "normal"
+surface = "fairway"
+
+[[expected.strokes]]
+end = "at_rest"
+rest = [419.84347733621127, 25.971132942023587, 75.25635777545529]
+
+[expected.strokes.lie]
+sit = "normal"
+surface = "green"
+
+[[expected.strokes]]
+end = "at_rest"
+rest = [412.5201210580528, 25.84863332283424, 73.79596270241122]
+
+[expected.strokes.lie]
+sit = "normal"
+surface = "green"
+
+[[expected.strokes]]
+end = "holed"
+rest = [414.0, 25.814289694824218, 74.0]
+
+[expected.strokes.lie]
+sit = "normal"
+surface = "green"
