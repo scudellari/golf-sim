@@ -54,14 +54,22 @@ pub(super) fn grids(course: &Course, case: &Dict) -> Result<Variant, String> {
         "material_at" => course
             .material_at(position())
             .map_or(Variant::Nil, |material| {
-                object([
+                let mut fields = vec![
                     ("id", material.id.as_str().into()),
                     ("kind", (material.kind as i64).into()),
                     ("grass_height_m", material.grass_height_m.into()),
+                ];
+                if super::child(case, "output")
+                    .is_some_and(|output| output.get("grass_density").is_some())
+                {
+                    fields.push(("grass_density", material.grass_density.into()));
+                }
+                fields.extend([
                     ("grass", material.grass.as_str().into()),
                     ("soil", material.soil.as_str().into()),
                     ("drainage", material.drainage.as_str().into()),
-                ])
+                ]);
+                object(fields)
             }),
         "material_index_at" => course
             .material_index_at(plan())

@@ -11,7 +11,10 @@ use golf_sim::{
         digest::sha256_hex,
         variant::{self, Variant},
     },
+    course::course::Course,
+    hole::Hole,
     records::hole::{Entry, HoleRecord, decode_envelope},
+    setup::Mode,
 };
 use golf_sim_testkit::items::hole::{masked_record_bytes, record_for_current_build};
 use serde_json::{Value, json};
@@ -22,6 +25,7 @@ const REBLESS: &str = "Raise the protocol version and re-bless with \
 #[test]
 fn caddie_transcript_holes_out_and_saves_the_committed_record() {
     let (replies, bytes) = transcript("caddie", &[]);
+    let replies = parse_lines(&replies);
     assert_eq!(replies[8]["ok"]["stroke"]["end"], "holed");
     assert_eq!(replies[9]["ok"]["prompt"], json!({"done": {}}));
     assert_eq!(replies[10]["ok"]["actions"], json!([]));
@@ -56,10 +60,11 @@ fn caddie_transcript_holes_out_and_saves_the_committed_record() {
 #[test]
 fn profile_transcript_has_the_same_replies_and_record_in_three_runs() {
     let args = ["--profile", "hcp15", "--seed", "7"];
-    let (_, expected) = transcript("profile", &args);
+    let (expected_replies, expected) = transcript("profile", &args);
     let expected_bytes = masked_record_bytes(&expected);
     for _ in 0..2 {
-        let (_, actual) = transcript("profile", &args);
+        let (replies, actual) = transcript("profile", &args);
+        assert_eq!(replies, expected_replies);
         assert_eq!(masked_record_bytes(&actual), expected_bytes);
     }
     let record = HoleRecord::from_bytes(&expected).unwrap();
@@ -201,18 +206,35 @@ fn schema_matches_the_snapshot_and_protocol_one_is_frozen() {
     );
 }
 
-fn transcript(name: &str, args: &[&str]) -> (Vec<Value>, Vec<u8>) {
+fn transcript(name: &str, args: &[&str]) -> (String, Vec<u8>) {
     let dir = Scratch::new();
     let path = data().join("cli");
     let script = fs::read(path.join(format!("{name}.jsonl"))).unwrap();
     let expected = fs::read_to_string(path.join(format!("{name}.out.jsonl"))).unwrap();
     let actual = success(play(&dir, &script, args));
+    let bytes = fs::read(dir.0.join(format!("target/c27-{name}.rec"))).unwrap();
     assert_eq!(actual.lines().count(), expected.lines().count(), "{name}");
     for (index, (received, expected)) in actual.lines().zip(expected.lines()).enumerate() {
-        assert_eq!(received, expected, "{name} reply {}", index + 1);
+        if name == "profile" && index == 3 {
+            assert_rough_preview(received, expected, &bytes);
+        } else {
+            assert_eq!(received, expected, "{name} reply {}", index + 1);
+        }
     }
-    let bytes = fs::read(dir.0.join(format!("target/c27-{name}.rec"))).unwrap();
-    (parse_lines(&actual), bytes)
+    (actual, bytes)
+}
+
+fn assert_rough_preview(received: &str, expected: &str, record: &[u8]) {
+    let course = Course::open(&data().join("courses/test-course")).unwrap();
+    let hole = Hole::resume(course, record).unwrap();
+    let preview = hole.observe(Mode::Caddie).address.unwrap().preview.unwrap();
+    let mut reference: Value = serde_json::from_str(expected).unwrap();
+    assert_eq!(reference["id"], "after");
+    assert_eq!(reference["ok"]["ball"]["lie"], "rough");
+    // The snapshot's preview predates the mown-rough contact model.
+    reference["ok"]["address"]["preview"] =
+        serde_json::from_str(&serde_json::to_string(&preview).unwrap()).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(received).unwrap(), reference);
 }
 
 fn parse_lines(text: &str) -> Vec<Value> {

@@ -67,12 +67,17 @@ impl BallLie {
             sand_firmness: 0.5,
             divot: DivotLie::None,
         };
-        lie.set_grass(grass_mm / 1000.0);
+        lie.set_grass(grass_mm / 1000.0, None);
         lie
     }
 
-    pub fn set_grass(&mut self, height_m: Real) {
+    /// An explicit material density applies throughout the stand, including a zero density.
+    pub fn set_grass(&mut self, height_m: Real, density: Option<Real>) {
         self.grass_height_m = height_m;
+        if let Some(density) = density.filter(|&density| density >= 0.0) {
+            self.grass_density = density;
+            return;
+        }
         self.grass_density = sit_profile(self.surface).2;
         if let Some(&(_, leaf_m)) = LEAF_HEIGHT_M
             .iter()
@@ -116,15 +121,26 @@ mod tests {
         let mut fescue = BallLie::on(Surface::DeepRough, Sit::Normal, Vec3::ZERO);
         assert_eq!(fescue.grass_height_m, 0.1);
         assert_eq!(fescue.grass_density, 0.55);
-        fescue.set_grass(0.42);
+        fescue.set_grass(0.42, None);
         assert_eq!(fescue.grass_height_m, 0.42);
         assert!((fescue.grass_density - 0.55 * 0.225 / 0.42).abs() < 1e-12);
 
         let mut rough = BallLie::on(Surface::Rough, Sit::Normal, Vec3::ZERO);
         for height_m in [0.0, 0.055, 0.42] {
-            rough.set_grass(height_m);
+            rough.set_grass(height_m, None);
             assert_eq!(rough.grass_density, 0.55);
         }
+    }
+
+    #[test]
+    fn material_density_overrides_the_leaf_stand_model() {
+        let mut lie = BallLie::on(Surface::DeepRough, Sit::Normal, Vec3::ZERO);
+        lie.set_grass(0.5, Some(0.55));
+        assert_eq!(lie.grass_density, 0.55);
+        lie.set_grass(0.5, Some(0.0));
+        assert_eq!(lie.grass_density, 0.0);
+        lie.set_grass(0.42, None);
+        assert!((lie.grass_density - 0.55 * 0.225 / 0.42).abs() < 1e-12);
     }
 }
 

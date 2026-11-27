@@ -362,7 +362,14 @@ fn strike_bounds(
     let frame = CollisionFrame {
         request,
         pre,
-        head: impact::head_orientation(&request.club, delivery, aim, right, pre.face_close_rad),
+        head: impact::head_orientation(
+            &request.club,
+            delivery,
+            aim,
+            right,
+            pre.face_close_rad,
+            pre.face_deloft_rad,
+        ),
         approach: (aim * fm::cos(delivery.path_rad) + right * fm::sin(delivery.path_rad))
             * fm::cos(delivery.attack_rad)
             + UP * fm::sin(delivery.attack_rad),
@@ -1118,6 +1125,9 @@ fn replay(case: &Dict, course: Option<&Course>, drift: bool) -> Result<Variant, 
                 vec3(input, "f"),
                 vec3(input, "s"),
                 number(input, "close_rad"),
+                input
+                    .get("deloft_rad")
+                    .map_or(0.0, |_| number(input, "deloft_rad")),
             );
             record! {
                 normal: vector(head.normal),

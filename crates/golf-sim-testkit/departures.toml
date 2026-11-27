@@ -1,6 +1,6 @@
 # Edit this table under testdata/ and copy it to crates/golf-sim-testkit/ for packaging.
 # Intentional departures from recorded results. Each [[departure]] has an id,
-# a layer, and a change (commit or version).
+# a layer or fixture key, and a change (commit or version).
 
 [[departure]]
 id = "case/putt-holed-stick-true/000000"
@@ -153,6 +153,631 @@ layer = "physics"
 change = "physics 0.9.0: flagstick rim response"
 
 # Apply these only to physics values recorded before the named model change.
+[[departure]]
+id = "play/test-course/2/1/tour/address/002"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/1/tour/address/003"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/1/tour/address/004"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/2/tour/address/002"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/2/tour/address/003"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/2/tour/address/004"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/3/tour/address/002"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/3/tour/address/003"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/3/tour/address/004"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/4/tour/address/005"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/4/tour/address/006"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/4/tour/address/007"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/005"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/006"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/007"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/003"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/005"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/006"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/007"
+layer = "hole/advice"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/1/tour/address/002"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/1/tour/address/003"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/1/tour/address/004"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/2/tour/address/002"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/2/tour/address/003"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/2/tour/address/004"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/3/tour/address/002"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/3/tour/address/003"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/3/tour/address/004"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/4/tour/address/005"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/4/tour/address/006"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/4/tour/address/007"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/004"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/005"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/006"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/2/5/tour/address/007"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/003"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/004"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/005"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/006"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "play/test-course/3/3/tour/address/007"
+layer = "hole/observe"
+change = "physics 0.12.0: rough contact changes a replayed shot before this address"
+
+[[departure]]
+id = "suite/test_stroke/test_a_perfect_stock_swing_is_never_a_mishit_from_grass_or_bare_ground/001441"
+layer = "physics/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/003037"
+layer = "physics/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/009383"
+layer = "physics/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_a_full_wedge_hacks_a_ball_out_of_tall_native_grass/000026"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_a_full_wedge_hacks_a_ball_out_of_tall_native_grass/000052"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000035"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000042"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000091"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000215"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000217"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000329"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000341"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000355"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000392"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000411"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000418"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000420"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000425"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000460"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000481"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000511"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000544"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000553"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000572"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000586"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000595"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000656"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000665"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000726"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000740"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000749"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000768"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000775"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_difficult_lie_launches_change_smoothly/000817"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_heavy_rough_slows_the_club_and_shuts_the_face/000008"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "suite/test_contact/test_rough_of_one_and_two_ball_diameters_keeps_the_measured_ball_speed/000025"
+layer = "physics/impact"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_contact/test_tall_grass_never_grips_the_ball_better_than_a_clean_face/000035"
+layer = "physics/impact"
+change = "physics 0.12.0: grass film adds restitution cushion"
+
+[[departure]]
+id = "play/test-course/2/1/tour"
+layer = "records/holes"
+change = "physics 0.12.0: rough contact changes a replayed resting position"
+
+[[departure]]
+id = "play/test-course/2/2/tour"
+layer = "records/holes"
+change = "physics 0.12.0: rough contact changes a replayed resting position"
+
+[[departure]]
+id = "play/test-course/2/3/tour"
+layer = "records/holes"
+change = "physics 0.12.0: rough contact changes a replayed resting position"
+
+[[departure]]
+id = "play/test-course/2/4/tour"
+layer = "records/holes"
+change = "physics 0.12.0: rough contact changes a replayed resting position"
+
+[[departure]]
+id = "play/test-course/2/5/tour"
+layer = "records/holes"
+change = "physics 0.12.0: rough contact changes a replayed resting position"
+
+[[departure]]
+id = "play/test-course/3/3/tour"
+layer = "records/holes"
+change = "physics 0.12.0: rough contact changes a replayed resting position"
+
+[[departure]]
+id = "play/test-course/3/stroke.play/01f8a42c94e7d3e21d83ba044f58448e42f347b80d6f11dd2640be7d78403fc4"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "play/test-course/3/stroke.preview/cbe6fde568131650ba5f6b0587c7e58c12a6edfcec72099f5aa564d106dee616"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "sample/test-course/1/stroke.preview/e7645a2298aaec281c0b3a6ecde2c1a8d7d8fa27d84e620c0270d7eb7379f77e"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "sample/test-course/2/stroke.launch/a701bb536b668d0f11fabd5493f0f34545b75e2c31d5955fba051d7622154dff"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "sample/test-course/3/stroke.launch/c11aec7512de78ec81ca0f3d0a4b66fc89633ac3a96484c76ea2a8f2bf52e3eb"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "sample/test-course/3/stroke.play/c11aec7512de78ec81ca0f3d0a4b66fc89633ac3a96484c76ea2a8f2bf52e3eb"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_a_club_that_ploughs_the_turf_behind_the_ball_reads_fat_at_any_depth_at_the_ball/stroke.play/431ab03bc88d527150257ee8ae34e3deed286f29758792996b8a1114104ae2a4"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_a_club_that_ploughs_the_turf_behind_the_ball_reads_fat_at_any_depth_at_the_ball/stroke.play/be634176f20d8cd9db4c843141a450cd178132b41f526b6ad8028e41c777ae7f"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_a_perfect_stock_swing_is_never_a_mishit_from_grass_or_bare_ground/stroke.play/88f5ebca0aeac8787d1ecc43e6f2a0f7719ec2eb3fea4940c968c8c4e2b39f23"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_a_perfect_stock_swing_is_never_a_mishit_from_grass_or_bare_ground/stroke.play/aee9f7462ae2ffa4990d71795810dc0e313ab1f03b5a90775ea4495544873d08"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_a_perfect_stock_swing_is_never_a_mishit_from_grass_or_bare_ground/stroke.play/d7e5cd45c376318f1f92c45dc1bf71f9ba1ec4c6e485bc31668a26a224102d56"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_a_perfect_stock_swing_is_never_a_mishit_from_grass_or_bare_ground/stroke.play/d86ff1066e96ff3f3c75b2d4fc4888cf24a99c47456800b97b788cb1e5971876"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/0717692e3f1c72cf874eb22f6f83575c44e9a2e96e6d9a867fcd51a0528fa7bb"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/1c6c40fdb99fe3a580b0531aeeb8fa7298fbda6e09f3b16acabaa897adfe474e"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/1e804c2140a8ab60774281edce3bf7e21b5387e600313e2b1becfd6f01bdfc79"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/3328a85aeb18493eadb9794627227e4b1f4072d55803ff6e02c04d3380953547"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/340e1b4d347cc7b0ef2672b55687fc9cdefab9d5fd6cb8d03cf58e772b07df51"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/386e858e7b39af50c44fff4a92992cabf91a94531966cdd3a4f388458e5cbe95"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/7786274c99929507e6b8381ae489d25b2f3cbb6ead3747a9b828a1148b9401b2"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/8708b51bcb8f65d09ff9043fb88a12edc1312d5d0b35e1a8f61fa1b02a95430f"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/8cf47c26afab1e9b0942c3d423efcdd357a966ce64afaaa8c7de20f4f1397085"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/96a09b1269e3c30e1b987a10993720ca10b7dc5906bb6f121a4508d2cb6abdf8"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/9771bcb4217e32638a9be9ca22d154f2ee736b53606faad0f34fe937bcddb18c"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/9b5f2c10c7dbf951efce828cae223749f6df3533ec04eccf160f7653f4e084c0"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/9fb0c1f114fd4d5140eaa23b475994bc2e599dd06f1e8b3a4b892117d2d16c3b"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/9fe8152d6c5009dcc9e1a25f1ee6e4186b0e70d169d294644bbfd2297b24fa23"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/a0e9f90a5782a0aa71a3942b18868d3a2376da0b0875b95abab01df33fc0402f"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/a3454a6e8422472ab84683797afe45ba2bf73d985dd61f6218523e519fcdaadc"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/a5c232403a2b9184e3d581f810589f16300f54d3dec714b1517b15baa1aed46b"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/a7ccc647bf5254e18ea6ab404dbd1d963788591431feded55c70e5c026780a50"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/a95dfbc3de231ffc42f7f4d14fb2082d4297efd8f53f54d46cf8030734562fe8"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/ace04423d468b3470f7e8900d8ecdc848a74de2a95812457ae4d266e1afb4a14"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/b35afac692ec70728fe9a60cd2ad4083bde48ec306154d30be03c42a010cf6f5"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/b511bed71f216050fb507fe1e1f352dffe9288bb9833921015cd8d82b14b19ef"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/b5c85f388615c2f1040dfb6a7950f3f1ae3feec43518e0fb4b47ea407ebe3b27"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/b914e115ea5114ec953fcc7a1482d69d664ca25accf7964f5829bc36d985ef8a"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/cb1e0643dd13b6093bbc80bc7c3da1f68fb026868486aad93ea49bfa0e781644"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/cd9f07fe7cd82375f70544ad10a2db462eb096817117010cc0c2980d9216c8c9"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/def1c23087e749544bbf0d3329c437a2e1b301ef4490acc52d8dc4adcbaca7b8"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/ea0ec8c7ed7b521d3e33ede7c5f978fb0a05954ffa4c465864e21a034ba5f86f"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/efb8f51b95f2f527bef31ab98b5b2346ba1cef583e7f84fdc56998b16db95c23"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
+[[departure]]
+id = "suite/test_stroke/test_deep_rough_costs_more_than_rough_and_a_ball_sitting_down_most/stroke.play/f8aff38848e312c7961ea65b1d2dbd47097195ab3bd6bbe5271c9d397dc4bff4"
+layer = "stroke/facade"
+change = "physics 0.12.0: long-grass film and deloft change launch"
+
 [[field_departure]]
 call = "tunables.constants"
 fields = ["VERSION", "FLAGSTICK_RESTITUTION", "FLAGSTICK_STIFF_RESTITUTION", "FLAGSTICK_TANGENTIAL_FRICTION"]
@@ -181,6 +806,18 @@ call = "tunables.VERSION"
 fields = ["$"]
 version = "0.11.0"
 change = "physics 0.11.0: green bounce across the iron range"
+
+[[field_departure]]
+call = "tunables.constants"
+fields = ["VERSION", "GRASS_DELOFT_RATE", "GRASS_DELOFT_MAX_DEG"]
+version = "0.12.0"
+change = "physics 0.12.0: grass film restitution and deloft from grass work"
+
+[[field_departure]]
+call = "tunables.VERSION"
+fields = ["$"]
+version = "0.12.0"
+change = "physics 0.12.0: grass film restitution and deloft from grass work"
 
 [[precision_departure]]
 fixture = "physics/facade"

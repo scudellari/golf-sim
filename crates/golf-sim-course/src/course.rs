@@ -176,6 +176,8 @@ pub struct GroundMaterial {
     pub id: String,
     pub kind: Surface,
     pub grass_height_m: Real,
+    /// Density throughout the stand, or -1.0 for the surface default.
+    pub grass_density: Real,
     pub grass: String,
     pub soil: String,
     pub drainage: String,

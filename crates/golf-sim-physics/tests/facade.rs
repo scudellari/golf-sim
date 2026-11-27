@@ -60,8 +60,9 @@ fn matches_facade_fixture() {
         })
         .unwrap();
     assert_eq!(golden, 1);
+    assert_eq!(golf_sim_physics::tunables::VERSION, "0.12.0");
     assert_eq!(report.checked + report.skipped.len(), case_count);
-    assert_eq!(report.skipped.len(), 18);
+    assert_eq!(report.skipped.len(), 21);
     let generated: Vec<_> = report
         .skipped
         .iter()

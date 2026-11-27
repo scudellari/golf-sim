@@ -50,7 +50,7 @@ fn values_match_physics_fixture() {
         .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(report.checked, case_count);
     assert!(report.skipped.is_empty());
-    assert_eq!(report.field_departures.len(), 17);
+    assert_eq!(report.field_departures.len(), 19);
     print!("{report}");
     println!(
         "{ground_cases} plane heights and samples and {playback_cases} position_at cases passed the physics tolerance"

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fmt::Write,
     fs,
     io::ErrorKind,
@@ -8,7 +9,7 @@ use std::{
 
 use golf_sim_base::variant::{Array, Dict, Variant};
 
-use crate::tolerance::Fixture;
+use crate::tolerance::{Departure, Fixture};
 
 use super::Result;
 
@@ -25,6 +26,17 @@ pub(super) fn id(case: &Dict) -> &str {
     case.get("id").and_then(Variant::as_str).unwrap()
 }
 
+pub(super) fn replay_header(header: &Dict, listed: &BTreeMap<&str, &Departure>) -> Dict {
+    let mut replay = header.clone();
+    let Some(Variant::Array(cases)) = replay.get_mut("cases") else {
+        unreachable!("validated fixture cases");
+    };
+    cases
+        .items
+        .retain(|case| !listed.contains_key(id(case.as_dict().unwrap())));
+    replay
+}
+
 pub(super) struct Projection {
     dir: PathBuf,
     actual: Vec<Variant>,
@@ -38,6 +50,7 @@ impl Projection {
         tolerance_layer: Option<&str>,
         pairs: impl IntoIterator<Item = Pair>,
         departures: Vec<(&str, &str)>,
+        listed: &BTreeMap<&str, &Departure>,
     ) -> Result<Self> {
         let dir = Self::scratch_dir()?;
         let mut projection = Self {
@@ -49,8 +62,12 @@ impl Projection {
         let mut cases = Vec::new();
         let mut pairs = pairs.into_iter();
         for case in rows(header) {
+            let (expected, actual) = if listed.contains_key(id(case)) {
+                (Variant::Nil, Variant::Nil)
+            } else {
+                pairs.next().ok_or("missing projected case")?
+            };
             let mut case = case.entries().to_vec();
-            let (expected, actual) = pairs.next().ok_or("missing projected case")?;
             case.retain(|(key, _)| {
                 !matches!(key.as_str(), Some("output" | "corpus_projection_index"))
             });

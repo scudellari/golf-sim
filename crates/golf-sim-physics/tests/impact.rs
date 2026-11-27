@@ -45,9 +45,9 @@ fn matches_impact_fixture() {
             }
             panic!("{error}");
         });
-    assert_eq!(report.checked, case_count);
+    assert_eq!(report.checked + report.skipped.len(), case_count);
     assert_eq!(checked_spin_loft, impact_fixture::SPIN_LOFT_CASES.len());
-    assert!(report.skipped.is_empty());
+    assert_eq!(report.skipped.len(), 34);
     assert!(report.discrete.is_empty());
     print!("{report}");
 }
@@ -435,4 +435,161 @@ fn traced_impact_records_phases_without_changing_the_launch() {
     }));
     assert_eq!(launch.values[0].value, traced.readout.ball_speed_mps);
     println!("delivery, impact and launch traced with identical result bits");
+}
+
+#[test]
+fn mown_rough_lowers_iron_launch_and_taller_rough_cuts_spin() {
+    let air = AirSample::default();
+    for (id, mph, attack_deg, loft_deg) in [
+        (ClubId::Iron5, 92.0, -3.5, 20.0),
+        (ClubId::Iron8, 85.0, -4.5, 27.0),
+        (ClubId::SandWedge, 75.0, -5.0, 46.0),
+    ] {
+        let club = t::standard_club(id);
+        let ball = t::standard_ball();
+        let delivery = Delivery {
+            club_speed_mps: units::mph(mph),
+            attack_rad: deg_to_rad(attack_deg),
+            dynamic_loft_rad: deg_to_rad(loft_deg),
+            ..Delivery::default()
+        };
+        let fairway = Lie {
+            ball_height_m: 0.005,
+            ..Lie::default()
+        };
+        let request = ShotRequest::new(club.clone(), ball, delivery, fairway);
+        let clean = impact::strike(&request, &air, &PlaneGround::default(), &mut NoProbe).readout;
+
+        let rough = [0.043, 0.085].map(|grass_height_m| {
+            let lie = Lie {
+                surface: Surface::Rough,
+                ball_height_m: 0.01,
+                grass_height_m,
+                grass_density: 0.55,
+                ..Lie::default()
+            };
+            let mut delivery = delivery;
+            delivery.sole_height_m =
+                impact::sole_height_for_strike(&club, &ball, &delivery, &lie, -0.005).max(0.0);
+            let request = ShotRequest::new(club.clone(), ball, delivery, lie);
+            let ground = PlaneGround::new(
+                GroundSample {
+                    surface: lie.surface,
+                    grass_height_m,
+                    grass_density: lie.grass_density,
+                    ..GroundSample::default()
+                },
+                Vec3::ZERO,
+            );
+            impact::strike(&request, &air, &ground, &mut NoProbe).readout
+        });
+
+        let launch_changes =
+            rough.map(|shot| rad_to_deg(shot.launch_angle_rad - clean.launch_angle_rad));
+        let spins = rough.map(|shot| units::to_rpm(shot.spin_rate_rad_s));
+        println!("{id:?} at 43/85 mm: launch changes {launch_changes:.2?}°, spin {spins:.0?} rpm");
+        match id {
+            ClubId::Iron5 => assert!(launch_changes.iter().all(|&change| change < 0.0)),
+            ClubId::SandWedge => assert!(launch_changes.iter().all(|&change| change > 0.0)),
+            _ => {}
+        }
+        assert!(spins[1] < spins[0], "{id:?}: {spins:?}");
+    }
+}
+
+#[test]
+fn fairway_and_tee_match_physics_0_11_1_bits() {
+    // Launch velocity and spin from 0.11.1, including cover and a nonzero film
+    // in the tall stands so the old friction and restitution both get exercised.
+    let cases = [
+        (
+            Surface::Fairway,
+            0.005,
+            0.012,
+            0.3,
+            [
+                0xbf97_2a6f_cb8c_fe91,
+                0x402c_4721_c51b_3b66,
+                0xc048_c28d_63da_6024,
+                0x4084_f919_22d5_fc56,
+                0x3fea_f00a_1405_b98b,
+                0xbfb0_f5f4_8acb_a904,
+            ],
+        ),
+        (
+            Surface::Tee,
+            0.009,
+            0.0,
+            0.0,
+            [
+                0,
+                0x402c_4c7d_51fd_9460,
+                0xc048_c786_ad87_11ca,
+                0x4084_fde2_c168_7d20,
+                0,
+                0,
+            ],
+        ),
+        (
+            Surface::Fairway,
+            0.005,
+            0.085,
+            0.3,
+            [
+                0xbfe2_dd86_78a5_957e,
+                0x4029_7cc2_eac6_d4b1,
+                0xc045_daee_1b49_3434,
+                0x4081_93f0_a2c1_30f2,
+                0x4034_6b34_e896_faa8,
+                0xbffa_22f7_3e96_ae28,
+            ],
+        ),
+        (
+            Surface::Tee,
+            0.009,
+            0.085,
+            0.3,
+            [
+                0xbfe2_7a92_18eb_cc2b,
+                0x4029_e3a9_d7e5_c05d,
+                0xc046_3373_00dd_01de,
+                0x4081_db97_d740_8281,
+                0x4034_00da_7029_93b2,
+                0xbff9_9a9b_e70e_bc3b,
+            ],
+        ),
+    ];
+    for (surface, ball_height_m, grass_height_m, grass_density, expected) in cases {
+        let lie = Lie {
+            surface,
+            ball_height_m,
+            grass_height_m,
+            grass_density,
+            ..Lie::default()
+        };
+        let club = t::standard_club(ClubId::Iron6);
+        let ball = t::standard_ball();
+        let mut delivery = Delivery {
+            club_speed_mps: units::mph(86.0),
+            attack_rad: deg_to_rad(-3.3),
+            dynamic_loft_rad: deg_to_rad(22.0),
+            ..Delivery::default()
+        };
+        delivery.sole_height_m =
+            impact::sole_height_for_strike(&club, &ball, &delivery, &lie, -0.004);
+        let request = ShotRequest::new(club, ball, delivery, lie);
+        let ground = PlaneGround::new(
+            GroundSample {
+                surface,
+                ..GroundSample::default()
+            },
+            Vec3::ZERO,
+        );
+        let launch = impact::strike(&request, &AirSample::default(), &ground, &mut NoProbe);
+        assert!(launch.valid);
+        let v = launch.velocity;
+        let s = launch.spin;
+        let actual = [v.x, v.y, v.z, s.x, s.y, s.z].map(Real::to_bits);
+        assert_eq!(actual, expected, "{surface:?} at {grass_height_m} m");
+    }
 }

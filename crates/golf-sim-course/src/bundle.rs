@@ -249,6 +249,7 @@ impl Read for GroundMaterial {
             id: field.get("id")?,
             kind: field.get("kind")?,
             grass_height_m: field.get("grass_height_m")?,
+            grass_density: field.optional("grass_density")?.unwrap_or(-1.0),
             grass: field.get("grass")?,
             soil: field.get("soil")?,
             drainage: field.get("drainage")?,

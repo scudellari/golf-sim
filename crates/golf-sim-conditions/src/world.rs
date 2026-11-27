@@ -8,12 +8,12 @@ use golf_sim_course::legal::{LegalMap, StanceFootprint};
 use golf_sim_physics::{
     facade::{pressure_at_altitude, wind_at_height},
     plane::ConstantAir,
-    samplers::{AirSampler, GroundSampler},
+    samplers::{AirSampler, GroundSampler, is_long_grass},
     values::Cup,
 };
 
 use crate::{
-    grounds::{CourseGround, Ground, is_long_grass},
+    grounds::{CourseGround, Ground},
     lies::{AddressLie, BallLie},
 };
 
@@ -147,7 +147,7 @@ impl<'a> World<'a> {
             let mut lie = BallLie::on(ground.surface, sit, spot);
             let sampled_grass = is_long_grass(ground.surface) && ground.grass_height_m >= 0.0;
             if sampled_grass {
-                lie.set_grass(ground.grass_height_m);
+                lie.set_grass(ground.grass_height_m, Some(ground.grass_density));
             }
             (lie, draw, sampled_grass)
         };
@@ -186,7 +186,16 @@ impl<'a> World<'a> {
                         turf
                     },
                 ),
-                ("grass_density", lie.grass_density, "", turf),
+                (
+                    "grass_density",
+                    lie.grass_density,
+                    "",
+                    if sampled_grass && ground.grass_density >= 0.0 {
+                        "ground.grass_density"
+                    } else {
+                        turf
+                    },
+                ),
                 ("sand_firmness", lie.sand_firmness, "", turf),
             ] {
                 probe.value(

@@ -5,7 +5,7 @@ use golf_sim_base::{
     container::Manifest,
     seed::SeedStream,
     trace::{NoProbe, Phase, Source, Trace},
-    variant::{self, Variant},
+    variant::{self, Dict, Variant},
 };
 use golf_sim_conditions::{
     grounds::CourseGround,
@@ -75,7 +75,11 @@ fn course_settle_traces_the_draw_and_turf() {
     assert!(matches!(turf.source, Source::Turf { .. }));
 }
 
-fn course_with_deep_rough(height_m: Real) -> std::sync::Arc<Course> {
+fn course_with_grass(
+    surface: Surface,
+    height_m: Real,
+    density: Option<Real>,
+) -> std::sync::Arc<Course> {
     let dir = testdata().join("courses/test-course");
     let course = Course::open(&dir).unwrap();
     let index = usize::from(course.material_index_at(Vec2::ZERO).unwrap().0);
@@ -89,8 +93,13 @@ fn course_with_deep_rough(height_m: Real) -> std::sync::Arc<Course> {
     let Variant::Dict(material) = &mut materials.items[index] else {
         panic!("expected a material dictionary");
     };
-    *material.get_mut("kind").unwrap() = "DEEP_ROUGH".into();
+    *material.get_mut("kind").unwrap() = surface.name().into();
     *material.get_mut("grass_height_m").unwrap() = height_m.into();
+    if let Some(density) = density {
+        let mut fields = material.entries().to_vec();
+        fields.push(("grass_density".into(), density.into()));
+        *material = Dict::new(fields);
+    }
     let Variant::Dict(property) = payload.get_mut("property").unwrap() else {
         panic!("expected a property dictionary");
     };
@@ -105,7 +114,8 @@ fn course_with_deep_rough(height_m: Real) -> std::sync::Arc<Course> {
 
 #[test]
 fn settling_on_course_fescue_uses_the_height_of_its_stand() {
-    let course = course_with_deep_rough(0.42);
+    let course = course_with_grass(Surface::DeepRough, 0.42, None);
+    assert_eq!(course.material_at(Vec3::ZERO).unwrap().grass_density, -1.0);
     let ground = CourseGround::new(&course, 0.5, 0.3, 2.85);
     assert_eq!(ground.sample_ground(0.0, 0.0).grass_height_m, 0.42);
     let world = World::on_course(ground, ConstantAir::default(), None, 0.0);
@@ -113,6 +123,49 @@ fn settling_on_course_fescue_uses_the_height_of_its_stand() {
     assert_eq!(lie.surface, Surface::DeepRough);
     assert_eq!(lie.grass_height_m, 0.42);
     assert!((lie.grass_density - 0.55 * 0.225 / 0.42).abs() < 1e-12);
+}
+
+#[test]
+fn baked_material_density_reaches_ground_samples_and_the_settled_lie() {
+    let course = course_with_grass(Surface::DeepRough, 0.5, Some(0.55));
+    let material = course.material_at(Vec3::ZERO).unwrap();
+    assert_eq!(material.grass_density, 0.55);
+    let ground = CourseGround::new(&course, 0.5, 0.3, 2.85);
+    let sample = ground.sample_ground(0.0, 0.0);
+    assert_eq!(sample.surface, Surface::DeepRough);
+    assert_eq!(sample.grass_height_m, 0.5);
+    assert_eq!(sample.grass_density, 0.55);
+    let world = World::on_course(ground, ConstantAir::default(), None, 0.0);
+    let lie = world.settle(Vec3::ZERO, Seed(1), &mut NoProbe);
+    assert_eq!(lie.grass_height_m, 0.5);
+    assert_eq!(lie.grass_density, 0.55);
+    assert_eq!(
+        world
+            .ground()
+            .sample_strike_ground(0.0, 0.0, Surface::Rough),
+        sample,
+    );
+    for surface in [
+        Surface::Fairway,
+        Surface::Tee,
+        Surface::Fringe,
+        Surface::Green,
+    ] {
+        let along_short_grass_strike = world.ground().sample_strike_ground(0.0, 0.0, surface);
+        assert_eq!(along_short_grass_strike.grass_height_m, 0.5);
+        assert_eq!(along_short_grass_strike.grass_density, -1.0);
+    }
+}
+
+#[test]
+fn material_density_only_reaches_ground_samples_on_long_grass() {
+    let course = course_with_grass(Surface::Fairway, 0.085, Some(0.7));
+    assert_eq!(course.material_at(Vec3::ZERO).unwrap().grass_density, 0.7);
+    let ground = CourseGround::new(&course, 0.5, 0.3, 2.85);
+    let sample = ground.sample_ground(0.0, 0.0);
+    assert_eq!(sample.surface, Surface::Fairway);
+    assert_eq!(sample.grass_height_m, -1.0);
+    assert_eq!(sample.grass_density, -1.0);
 }
 
 #[test]

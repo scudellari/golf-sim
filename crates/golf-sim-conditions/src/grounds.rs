@@ -6,7 +6,7 @@ use golf_sim_base::{Real, Surface, Vec2, Vec3};
 use golf_sim_course::{course::Course, legal::LegalMap, obstacles::ObstacleIndex, zones::ZoneMap};
 use golf_sim_physics::{
     plane::PlaneGround,
-    samplers::{GroundSample, GroundSampler, ZoneCrossing},
+    samplers::{GroundSample, GroundSampler, ZoneCrossing, is_long_grass},
     values::{ObstacleHit, Zone},
 };
 
@@ -51,13 +51,6 @@ impl<'a> CourseGround<'a> {
     }
 }
 
-pub(crate) fn is_long_grass(surface: Surface) -> bool {
-    matches!(
-        surface,
-        Surface::FirstCut | Surface::Rough | Surface::DeepRough
-    )
-}
-
 impl GroundSampler for CourseGround<'_> {
     fn sample_ground(&self, x: Real, z: Real) -> GroundSample {
         let point = Vec2::new(x, z);
@@ -73,12 +66,24 @@ impl GroundSampler for CourseGround<'_> {
         if let Some((_, grid)) = self.course.surface_at(point) {
             let material = &self.course.data().materials[usize::from(grid.material_at(point).0)];
             sample.surface = material.kind;
-            if is_long_grass(sample.surface) && material.grass_height_m >= 0.0 {
-                sample.grass_height_m = material.grass_height_m * grid.stand_at(point);
+            if is_long_grass(sample.surface) {
+                sample.grass_density = material.grass_density;
+                if material.grass_height_m >= 0.0 {
+                    sample.grass_height_m = material.grass_height_m * grid.stand_at(point);
+                }
             }
             if matches!(sample.surface, Surface::Green | Surface::Fringe) {
                 sample.green_speed_m = self.green_speed_m;
             }
+        }
+        sample
+    }
+
+    fn sample_strike_ground(&self, x: Real, z: Real, lie_surface: Surface) -> GroundSample {
+        let mut sample = self.sample_ground(x, z);
+        // A short-grass lie can still meet long grass near a mowing edge.
+        if !is_long_grass(lie_surface) {
+            sample.grass_density = -1.0;
         }
         sample
     }
@@ -248,6 +253,13 @@ impl GroundSampler for Ground<'_> {
             Self::Course(ground) => ground.sample_ground(x, z),
             Self::Practice(ground) => ground.sample_ground(x, z),
             Self::Plane(ground) => ground.sample_ground(x, z),
+        }
+    }
+
+    fn sample_strike_ground(&self, x: Real, z: Real, lie_surface: Surface) -> GroundSample {
+        match self {
+            Self::Course(ground) => ground.sample_strike_ground(x, z, lie_surface),
+            _ => self.sample_ground(x, z),
         }
     }
 

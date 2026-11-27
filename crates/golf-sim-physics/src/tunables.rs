@@ -3,7 +3,7 @@
 use crate::values::{BallSpec, ClubCategory, ClubSpec, ObstacleKind};
 use golf_sim_base::{ClubId, Real, Surface, num::deg_to_rad};
 
-pub const VERSION: &str = "0.11.1";
+pub const VERSION: &str = "0.12.0";
 
 // Constants
 
@@ -85,6 +85,7 @@ pub const EDGE_COR_FACTOR: Real = 0.8;
 pub const EDGE_COR_BLEND_M: Real = 0.003;
 pub const DRIVER_SMASH_LIMIT: Real = 1.50;
 pub const TANGENTIAL_SPEED_RANGE_MPS: Real = 9.0;
+// Turf and a film of grass pressed between the face and ball both cut restitution.
 pub const INTERFERENCE_COR_LOSS: Real = 0.25;
 pub const INTERFERENCE_FRICTION_LOSS: Real = 0.75;
 pub const INTERFERENCE_TANGENTIAL_LOSS: Real = 1.0;
@@ -105,6 +106,9 @@ pub const GRASS_CUT_ENERGY: Real = 3.5e4;
 pub const GRASS_ABOVE_HEAD_SHARE: Real = 0.2;
 pub const GRASS_FACE_CLOSE_DEG_PER_J: Real = 0.1;
 pub const GRASS_FACE_CLOSE_MAX_DEG: Real = 15.0;
+// Scaled by the CG height over the heel-toe moment, about 0.2° per joule for an iron.
+pub const GRASS_DELOFT_RATE: Real = 1.47e-5;
+pub const GRASS_DELOFT_MAX_DEG: Real = 15.0;
 pub const GRASS_CLOSE_BY_CATEGORY: [Real; 6] = [0.4, 0.4, 0.7, 1.0, 1.0, 0.0];
 pub const GRASS_FULL_BLOCK_M: Real = 0.01;
 pub const GRASS_FILM_START_M: Real = 0.020;

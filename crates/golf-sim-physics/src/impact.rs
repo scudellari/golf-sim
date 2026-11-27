@@ -34,6 +34,7 @@ pub fn head_orientation(
     forward: Vec3,
     right: Vec3,
     close_rad: Real,
+    deloft_rad: Real,
 ) -> Head {
     let lie = -delivery.dynamic_lie_rad;
     let face = -(delivery.face_rad - close_rad);
@@ -42,10 +43,11 @@ pub fn head_orientation(
             .rotated(forward, lie)
             .rotated(UP, face)
     };
-    let head_loft = delivery.dynamic_loft_rad - club.loft_rad;
+    let loft = delivery.dynamic_loft_rad - deloft_rad;
+    let head_loft = loft - club.loft_rad;
     Head {
-        normal: orient(forward, delivery.dynamic_loft_rad),
-        face_up: orient(UP, delivery.dynamic_loft_rad),
+        normal: orient(forward, loft),
+        face_up: orient(UP, loft),
         toe: right.rotated(forward, lie).rotated(UP, face),
         forward: orient(forward, head_loft),
         up: orient(UP, head_loft),
@@ -59,7 +61,7 @@ pub fn sole_height_for_strike(
     lie: &Lie,
     up_m: Real,
 ) -> Real {
-    let head = head_orientation(club, delivery, FORWARD, RIGHT, 0.0);
+    let head = head_orientation(club, delivery, FORWARD, RIGHT, 0.0, 0.0);
     let height = if lie.surface == Surface::Bunker {
         lie.ball_height_m.max(0.0)
     } else {
@@ -100,7 +102,14 @@ pub fn strike<P: Probe>(
         let pre = strike::before_ball(request, forward, right, ground);
         let face = Face {
             club,
-            head: head_orientation(club, d, forward, right, pre.face_close_rad),
+            head: head_orientation(
+                club,
+                d,
+                forward,
+                right,
+                pre.face_close_rad,
+                pre.face_deloft_rad,
+            ),
             radius: ball.radius_m,
         };
         // Local coordinates preserve the lever arms at large world positions.

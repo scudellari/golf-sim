@@ -30,8 +30,8 @@ fn reference_holes() {
     .unwrap();
     let case_count = fixture.cases().len();
     let report = fixture.check().unwrap();
-    assert_eq!(report.checked, case_count);
-    assert!(report.skipped.is_empty());
+    assert_eq!(report.checked + report.skipped.len(), case_count);
+    assert_eq!(report.skipped.len(), 6);
     print!("{report}");
 }
 

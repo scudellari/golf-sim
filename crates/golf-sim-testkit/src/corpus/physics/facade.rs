@@ -10,7 +10,7 @@ use golf_sim_course::course::{Course, LegalKind, Tree, Wall};
 use golf_sim_physics::{
     facade as sim,
     plane::{ConstantAir, PlaneGround},
-    samplers::{AirSample, GroundSample, GroundSampler, ZoneCrossing},
+    samplers::{AirSample, GroundSample, GroundSampler, ZoneCrossing, is_long_grass},
     values::{
         BallSpec, ClubCategory, ClubSpec, Contact, Cup, Delivery, Launch, LaunchReadout, Lie,
         ObstacleHit, ObstacleKind, ShotRequest, ShotResult, Zone,
@@ -168,15 +168,21 @@ impl GroundSampler for CourseGround<'_> {
         if let Some((_, grid)) = self.course.surface_at(point) {
             let material = &self.course.data().materials[usize::from(grid.material_at(point).0)];
             sample.surface = material.kind;
-            if matches!(
-                material.kind,
-                Surface::FirstCut | Surface::Rough | Surface::DeepRough
-            ) {
+            if is_long_grass(material.kind) {
                 sample.grass_height_m = material.grass_height_m * grid.stand_at(point);
+                sample.grass_density = material.grass_density;
             }
             if matches!(material.kind, Surface::Green | Surface::Fringe) {
                 sample.green_speed_m = self.green_speed_m;
             }
+        }
+        sample
+    }
+
+    fn sample_strike_ground(&self, x: Real, z: Real, lie_surface: Surface) -> GroundSample {
+        let mut sample = self.sample_ground(x, z);
+        if !is_long_grass(lie_surface) {
+            sample.grass_density = -1.0;
         }
         sample
     }

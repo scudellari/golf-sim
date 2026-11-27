@@ -8,7 +8,7 @@ use golf_sim_base::{
 };
 
 use crate::{
-    samplers::GroundSampler,
+    samplers::{GroundSampler, is_long_grass},
     tunables as t,
     values::{Lie, ShotRequest, UP},
 };
@@ -17,6 +17,7 @@ use crate::{
 pub struct PreImpact {
     pub club_speed_mps: Real,
     pub face_close_rad: Real,
+    pub face_deloft_rad: Real,
     pub interference: Real,
     pub cushion: Real,
     pub sole_height_m: Real,
@@ -42,6 +43,7 @@ impl Default for PreImpact {
         Self {
             club_speed_mps: 0.0,
             face_close_rad: 0.0,
+            face_deloft_rad: 0.0,
             interference: 0.0,
             cushion: 0.0,
             sole_height_m: 0.0,
@@ -85,6 +87,7 @@ pub fn before_ball(
     let path = forward * fm::cos(d.path_rad) + right * fm::sin(d.path_rad);
     let base_height = ground.sample_ground(position.x, position.z).height_m;
     let bunker = lie.surface == Surface::Bunker;
+    let long_grass = is_long_grass(lie.surface);
     let spin_loft_deg = rad_to_deg(d.dynamic_loft_rad - d.attack_rad);
     let sand_lift = smoothstep(t::SAND_LIFT_START_DEG, t::SAND_LIFT_FULL_DEG, spin_loft_deg);
     let mut sand_scale = lerpf(t::SAND_CUT_LOW_LOFT_SCALE, 1.0, sand_lift);
@@ -123,7 +126,7 @@ pub fn before_ball(
         let arc_y = sole_height - x * tan_attack + x * x / (2.0 * radius);
         let point_x = position.x - path.x * x;
         let point_z = position.z - path.z * x;
-        let sample = ground.sample_ground(point_x, point_z);
+        let sample = ground.sample_strike_ground(point_x, point_z, lie.surface);
         let soil_y = sample.height_m - base_height;
         let hard = matches!(sample.surface, Surface::Hardpan | Surface::CartPath);
         if hard && i >= 0 {
@@ -166,7 +169,10 @@ pub fn before_ball(
         };
         let density = if sample.grass_density >= 0.0 {
             sample.grass_density
-        } else if sample.surface == lie.surface && lie.grass_density > 0.0 {
+        } else if sample.surface == lie.surface
+            && (lie.grass_density > 0.0
+                || (long_grass && lie.grass_height_m > 0.0 && lie.grass_density == 0.0))
+        {
             lie.grass_density
         } else {
             t::GRASS_PATH_DEFAULT_DENSITY
@@ -213,12 +219,18 @@ pub fn before_ball(
             * deg_to_rad(t::GRASS_FACE_CLOSE_DEG_PER_J)
             * t::GRASS_CLOSE_BY_CATEGORY[club.category as usize],
     );
+    // Drag on the sole acts below the clubhead's centre of gravity.
+    if long_grass {
+        let lever = club.face_center_height_m + club.cg_up_m;
+        contact.face_deloft_rad = deg_to_rad(t::GRASS_DELOFT_MAX_DEG)
+            .min(grass_work * t::GRASS_DELOFT_RATE * lever / club.moi_heel_toe);
+    }
     let full_block = if bunker {
         t::SAND_FULL_BLOCK_DEPTH_M
     } else {
         t::TURF_FULL_BLOCK_DEPTH_M
     };
-    contact.cushion = smoothstep(
+    let turf_block = smoothstep(
         0.0,
         full_block,
         (-contact.sole_height_m).max(soil_area / t::TURF_BLOCK_LOOKBACK_M) * depth_keep,
@@ -230,7 +242,12 @@ pub fn before_ball(
         d.dynamic_loft_rad,
         spin_loft_deg,
     );
-    contact.interference = clampf(contact.cushion.max(grass_block), 0.0, 1.0);
+    contact.interference = clampf(turf_block.max(grass_block), 0.0, 1.0);
+    contact.cushion = if long_grass {
+        turf_block.max(contact.grass_film)
+    } else {
+        turf_block
+    };
     if bunker {
         sand_contact(
             &mut contact,
@@ -279,8 +296,12 @@ fn grass_contact(
                 escape,
             ),
     );
-    contact.grass_film = block
-        * (1.0 - cover)
+    let film_block = if is_long_grass(lie.surface) {
+        block
+    } else {
+        block * (1.0 - cover)
+    };
+    contact.grass_film = film_block
         * smoothstep(
             t::GRASS_FILM_START_M,
             t::GRASS_FILM_FULL_M,

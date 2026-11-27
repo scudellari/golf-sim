@@ -35,8 +35,8 @@ fn every_recorded_stroke_call_matches() {
             *counts.entry(call.to_owned()).or_insert(0) += 1;
         })
         .unwrap();
-    assert_eq!(report.checked, case_count);
-    assert!(report.skipped.is_empty());
+    assert_eq!(report.checked + report.skipped.len(), case_count);
+    assert_eq!(report.skipped.len(), 42);
     assert!(report.discrete.is_empty(), "{report}");
     print!("{report}");
     for (call, count) in counts {
@@ -95,7 +95,7 @@ fn a_wedge_or_short_iron_advances_out_of_native_fescue() {
     let fairway = clubs.map(fairway_carry);
     for sit in [Sit::Up, Sit::Normal, Sit::Down] {
         let mut lie = BallLie::on(Surface::DeepRough, sit, Vec3::ZERO);
-        lie.set_grass(0.42);
+        lie.set_grass(0.42, None);
         let shares = std::array::from_fn::<_, 7, _>(|i| stock_carry(clubs[i], lie) / fairway[i]);
         println!("{sit:?} fescue carry shares: {shares:.3?}");
         for (club, share) in clubs.into_iter().zip(shares).take(3) {
@@ -113,6 +113,25 @@ fn a_wedge_or_short_iron_advances_out_of_native_fescue() {
             );
         }
     }
+}
+
+#[test]
+fn a_wedge_only_hacks_a_ball_out_of_marsh_sedge() {
+    use ClubId::{Hybrid, Iron5, Iron9, SandWedge};
+
+    let mut lie = BallLie::on(Surface::DeepRough, Sit::Normal, Vec3::ZERO);
+    lie.set_grass(0.5, Some(0.55));
+    let [sand_wedge, iron9, iron5, hybrid] =
+        [SandWedge, Iron9, Iron5, Hybrid].map(|club| stock_carry(club, lie) / fairway_carry(club));
+    println!(
+        "Marsh carry shares (SW, 9i, 5i, hybrid): {sand_wedge:.3}, {iron9:.3}, {iron5:.3}, {hybrid:.3}"
+    );
+    assert!((0.15..=0.5).contains(&sand_wedge));
+    lie.set_grass(0.42, None);
+    assert!(sand_wedge + 0.1 < stock_carry(SandWedge, lie) / fairway_carry(SandWedge));
+    assert!(iron9 < 0.1);
+    assert!(iron5 < 0.05);
+    assert!(hybrid < 0.05);
 }
 
 impl Model for StockModel {

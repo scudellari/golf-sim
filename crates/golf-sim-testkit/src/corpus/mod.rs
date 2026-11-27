@@ -266,17 +266,22 @@ impl FixtureRun {
     }
 
     fn project(&mut self, header: &Dict, drift: bool) -> Result<projection::Projection> {
+        // Recorded actions can diverge after a model change, before the projected values are compared.
+        let listed = Departures::load(&self.testdata)?;
+        let listed = listed.cases_for(&self.key);
+        let replay = (!listed.is_empty()).then(|| projection::replay_header(header, &listed));
+        let replay = replay.as_ref().unwrap_or(header);
         let (pairs, tolerance_layer) = match self.runner {
             Runner::MathPrims | Runner::SeedStreams | Runner::GeometryCases => (
-                projection::rows(header)
+                projection::rows(replay)
                     .map(|case| foundation::project(self.runner, case, drift))
                     .collect::<Result<_>>()?,
                 None,
             ),
-            Runner::RulesRelief => (rules::project(self, header, drift)?, Some("relief")),
-            Runner::RecordsHoles => (hole::records(self, header, drift)?, Some("hole")),
+            Runner::RulesRelief => (rules::project(self, replay, drift)?, Some("relief")),
+            Runner::RecordsHoles => (hole::records(self, replay, drift)?, Some("hole")),
             Runner::HoleAdvice | Runner::HoleObserve => {
-                (hole::addresses(self, header, drift)?, None)
+                (hole::addresses(self, replay, drift)?, None)
             }
             _ => unreachable!("runner uses unprojected output"),
         };
@@ -288,7 +293,14 @@ impl FixtureRun {
         } else {
             Vec::new()
         };
-        projection::Projection::prepare(header, &self.testdata, tolerance_layer, pairs, departures)
+        projection::Projection::prepare(
+            header,
+            &self.testdata,
+            tolerance_layer,
+            pairs,
+            departures,
+            &listed,
+        )
     }
 
     fn companion(&self, key: &str) -> Result<Variant> {

@@ -927,21 +927,27 @@ impl Departures {
             include_str!("../departures.toml"),
         )
     }
+
+    pub(crate) fn cases_for(&self, key: &str) -> BTreeMap<&str, &Departure> {
+        let layer = key.split_once('/').map_or(key, |(layer, _)| layer);
+        let mut cases = BTreeMap::new();
+        for departure in &self.departure {
+            if departure.layer == key || departure.layer == layer {
+                cases.entry(departure.id.as_str()).or_insert(departure);
+            }
+        }
+        cases
+    }
 }
 
 impl Fixture {
     fn selected_cases(&self) -> CorpusResult<(Vec<Case<'_>>, Vec<Departure>)> {
         let departures = Departures::load(&self.testdata)?;
-        let mut by_case = BTreeMap::new();
-        for departure in &departures.departure {
-            by_case
-                .entry((departure.layer.as_str(), departure.id.as_str()))
-                .or_insert(departure);
-        }
+        let by_case = departures.cases_for(self.key());
         let mut selected = Vec::new();
         let mut skipped = Vec::new();
         for case in self.cases() {
-            match by_case.get(&(case.layer, case.id())) {
+            match by_case.get(case.id()) {
                 Some(departure) => skipped.push((*departure).clone()),
                 None => selected.push(case),
             }

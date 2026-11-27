@@ -66,9 +66,21 @@ pub struct ZoneCrossing {
     pub zone: Zone,
 }
 
+pub fn is_long_grass(surface: Surface) -> bool {
+    matches!(
+        surface,
+        Surface::FirstCut | Surface::Rough | Surface::DeepRough
+    )
+}
+
 /// Deterministic ground queries over a fixed snapshot for one stroke.
 pub trait GroundSampler {
     fn sample_ground(&self, x: Real, z: Real) -> GroundSample;
+
+    /// Samples the club path for a ball on `lie_surface`.
+    fn sample_strike_ground(&self, x: Real, z: Real, _lie_surface: Surface) -> GroundSample {
+        self.sample_ground(x, z)
+    }
 
     fn obstacle_hit(&self, _from: Vec3, _to: Vec3, _radius_m: Real) -> Option<ObstacleHit> {
         None
