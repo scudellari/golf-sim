@@ -1,5 +1,5 @@
 use golf_sim_base::{
-    Real, Surface, Vec3,
+    Real, Surface, Vec2, Vec3, fm,
     trace::NoProbe,
     variant::{Components, Dict, FloatWidth, Variant},
 };
@@ -210,76 +210,157 @@ fn run_case(case: &Dict) -> Result<Variant, String> {
     Ok(result)
 }
 
-pub(in crate::corpus) fn run(case: &Dict, drift_report: bool) -> Result<Variant, String> {
-    const CUP_EDGE_TOLERANCE_M: Real = 1e-6;
-    const SINGLE_PRECISION_STEP: Real = 1.0 / (1 << 23) as Real;
+const SINGLE_PRECISION_STEP: Real = f32::EPSILON as Real;
 
+fn exact_rim_crossing(from: Vec3, to: Vec3, center: Vec3) -> Real {
+    let offset = Vec2::new(from.x - center.x, from.z - center.z);
+    let delta = Vec2::new(to.x - from.x, to.z - from.z);
+    let length = delta.length();
+    let radius = t::CUP_RADIUS_M;
+    if length == 0.0 {
+        return Real::INFINITY;
+    }
+    if offset.length_squared() < radius * radius {
+        return 0.0;
+    }
+    let direction = delta / length;
+    let perpendicular = offset.cross(direction).abs();
+    if perpendicular > radius {
+        return Real::INFINITY;
+    }
+    let half_chord = fm::sqrt((radius - perpendicular) * (radius + perpendicular));
+    let fraction = (-offset.dot(direction) - half_chord) / length;
+    if (0.0..=1.0).contains(&fraction) {
+        fraction
+    } else {
+        Real::INFINITY
+    }
+}
+
+fn matches_rim_crossing(from: Vec3, to: Vec3, center: Vec3, computed: Real) -> bool {
+    let exact = exact_rim_crossing(from, to, center);
+    computed == exact || (computed - exact).abs() <= 1e-11
+}
+
+fn grazing_rim(from: Vec3, to: Vec3, cup: Vec3, fraction: Real) -> Option<(Real, Real, Real)> {
+    let plan = |point: Vec3| Vec3::new(point.x, 0.0, point.z);
+    let offset = plan(from) - plan(cup);
+    let delta = plan(to) - plan(from);
+    let length_squared = delta.length_squared();
+    if !(0.0..=1.0).contains(&fraction) || length_squared == 0.0 {
+        return None;
+    }
+    let nearest = -offset.dot(delta) / length_squared;
+    if !(0.0..=1.0).contains(&nearest) {
+        return None;
+    }
+    let gap = |t| (offset + delta * t).length() - t::CUP_RADIUS_M;
+    // The quadratic starts with local vectors, rounded after translation. Its
+    // dot products can move a near-zero discriminant to either side of zero.
+    let bound =
+        8.0 * SINGLE_PRECISION_STEP * offset.length().max(delta.length()).max(t::CUP_RADIUS_M);
+    let nearest_gap = gap(nearest);
+    let crossing_gap = gap(fraction);
+    (nearest_gap.abs() <= bound && crossing_gap.abs() <= bound).then_some((
+        nearest_gap,
+        crossing_gap,
+        bound,
+    ))
+}
+
+pub(in crate::corpus) fn run(case: &Dict, drift_report: bool) -> Result<Variant, String> {
     let mut actual = run_case(case)?;
     let id = field(case, "id").as_str().unwrap();
     let input = dict(field(case, "input"));
     let expected = field(case, "output");
-    match id {
-        "case/physics/002609" if actual == Variant::from(Real::INFINITY) => {
-            assert_eq!(
-                field(case, "call").as_str(),
-                Some("cup_contact.rim_crossing")
-            );
-            let Variant::Float(recorded_fraction) = expected else {
-                panic!("{id} expected a recorded crossing fraction");
+    match field(case, "call").as_str().unwrap() {
+        "cup_contact.rim_crossing" => {
+            let (Variant::Float(recorded), Variant::Float(computed)) = (expected, &actual) else {
+                return Err("expected rim crossing fractions".into());
             };
-            assert!((0.0..=1.0).contains(&recorded_fraction.value()));
-            let horizontal = |key| {
-                let point = vec3(input, key);
-                Vec3::new(point.x, 0.0, point.z)
-            };
-            let offset = horizontal("from") - horizontal("cup");
-            let delta = horizontal("to") - horizontal("from");
-            assert!(delta.length_squared() > 0.0);
-            let nearest_fraction = (-offset.dot(delta) / delta.length_squared()).clamp(0.0, 1.0);
-            let rim_gap = |fraction| (offset + delta * fraction).length() - t::CUP_RADIUS_M;
-            let crossing_gap = rim_gap(recorded_fraction.value());
-            let nearest_gap = rim_gap(nearest_fraction);
-            if !drift_report
-                && !(crossing_gap.abs() <= CUP_EDGE_TOLERANCE_M
-                    && nearest_gap.abs() <= CUP_EDGE_TOLERANCE_M)
-            {
-                return Err(format!(
-                    "{id} rim gap at the recorded fraction {crossing_gap:.3e} m, closest approach {nearest_gap:.3e} m"
-                ));
+            let recorded = recorded.value();
+            let computed = computed.value();
+            let [from, to, center] = ["from", "to", "cup"].map(|key| vec3(input, key));
+            if !matches_rim_crossing(from, to, center, computed) {
+                return Err("core rim crossing differs from the first planar root".into());
             }
-            println!(
-                "case {id}: cup-edge threshold, recomputed crossing {crossing_gap:+.3e} m from the rim, closest approach {nearest_gap:+.3e} m"
-            );
-            if !drift_report {
-                actual = expected.clone();
+            let finite = match (recorded, computed) {
+                (recorded, computed) if computed == Real::INFINITY => recorded,
+                (recorded, computed) if recorded == Real::INFINITY => computed,
+                _ => return Ok(actual),
+            };
+            if let Some((nearest, crossing, bound)) = grazing_rim(from, to, center, finite) {
+                println!(
+                    "case {id}: cup-edge threshold, nearest gap {nearest:+.3e} m, crossing gap {crossing:+.3e} m (bound {bound:.3e} m)"
+                );
+                if !drift_report {
+                    actual = expected.clone();
+                }
             }
         }
-        "lab/test-course/009/flat through canopy/000024" => {
-            assert_eq!(field(case, "call").as_str(), Some("turf_bounce.impact"));
+        "turf_bounce.impact" => {
             let Variant::Dict(output) = &mut actual else {
-                panic!("{id} expected a contact output");
+                return Err("expected turf contact output".into());
             };
-            let expected_spin = vec3(dict(expected), "spin");
             let Variant::Vector3(spin) = output.get_mut("spin").unwrap() else {
-                panic!("{id} expected outgoing spin");
+                return Err("expected outgoing spin".into());
             };
-            let spin_in = vec3(input, "spin");
-            let scale = |spin: Vec3| spin.x.abs().max(spin.y.abs()).max(spin.z.abs()).max(1.0);
-            let drift = (spin.values[0] - expected_spin.x).abs();
-            let steps = drift / (SINGLE_PRECISION_STEP * scale(spin_in));
-            let output_steps = drift / (SINGLE_PRECISION_STEP * scale(expected_spin));
-            if !drift_report && !(steps.is_finite() && steps <= 8.0) {
-                return Err(format!("{id} spin.x drift {steps:.3} incoming-spin steps"));
-            }
-            println!(
-                "case {id}: spin.x near cancellation, {output_steps:.3} output steps, {steps:.3} incoming-spin steps (limit 8)"
-            );
-            // The layer check still compares all the other components and fields.
-            if !drift_report {
-                spin.values[0] = expected_spin.x;
+            let incoming = vec3(input, "spin");
+            let recorded = vec3(dict(expected), "spin");
+            let outgoing = Vec3::new(spin.values[0], spin.values[1], spin.values[2]);
+            let scale = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs()).max(1.0);
+            let operand = scale(incoming).max(scale(outgoing - incoming));
+            for ((actual, expected), axis) in spin
+                .values
+                .iter_mut()
+                .zip([recorded.x, recorded.y, recorded.z])
+                .zip(["x", "y", "z"])
+            {
+                let drift = (*actual - expected).abs();
+                let normal = 1e-6_f64
+                    .max(1e-5 * actual.abs().max(expected.abs()))
+                    .max(8.0 * SINGLE_PRECISION_STEP * scale(recorded));
+                let bound = 8.0 * SINGLE_PRECISION_STEP * operand;
+                if drift > normal && drift <= bound {
+                    println!(
+                        "case {id}: spin.{axis} drift {drift:.3e} rad/s after adding the impulse (bound {bound:.3e} rad/s)"
+                    );
+                    if !drift_report {
+                        *actual = expected;
+                    }
+                }
             }
         }
         _ => {}
     }
     Ok(actual)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_near_tangent_hit_requires_the_first_root() {
+        let r = t::CUP_RADIUS_M;
+        let from = Vec3::new(-r, 0.0, r - 1e-9);
+        let to = Vec3::new(r, 0.0, from.z);
+        let first = cup::rim_crossing(from, to, Vec3::ZERO);
+        assert!(matches_rim_crossing(from, to, Vec3::ZERO, first));
+        assert!(!matches_rim_crossing(from, to, Vec3::ZERO, Real::INFINITY));
+        assert!(!matches_rim_crossing(from, to, Vec3::ZERO, 1.0 - first));
+    }
+
+    #[test]
+    fn a_rounded_tangent_can_disagree_about_a_rim_crossing() {
+        let radius = t::CUP_RADIUS_M;
+        let from = Vec3::new(-radius, 0.0, radius + 1e-9);
+        let to = Vec3::new(radius, 0.0, from.z);
+        assert_eq!(cup::rim_crossing(from, to, Vec3::ZERO), Real::INFINITY);
+        assert!(grazing_rim(from, to, Vec3::ZERO, 0.5).is_some());
+
+        let miss = Vec3::new(0.0, 0.0, 1e-4);
+        assert!(grazing_rim(from + miss, to + miss, Vec3::ZERO, 0.5).is_none());
+        assert!(grazing_rim(from, to, Vec3::ZERO, 0.2).is_none());
+    }
 }
