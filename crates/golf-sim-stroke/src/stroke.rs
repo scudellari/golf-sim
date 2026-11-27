@@ -13,9 +13,10 @@ use golf_sim_physics::{
     samplers::{AirSampler, GroundSample, GroundSampler},
     values::{EndReason, Launch, ShotRequest, ShotResult},
 };
+use golf_sim_swing::spec::SwingSpec;
 
 use crate::{
-    address::{Address, Assists, Intent, Setting, StrikeMode},
+    address::{Address, Assists, Intent, Setting},
     delivery::{self, DeliveryExecution, DeliveryInput},
     results::{Aloft, DropResult, Preview, StrokeOutcome, StrokeResult},
     tuning as t,
@@ -64,26 +65,6 @@ pub fn footprint(club: ClubId, address: &Address) -> StanceFootprint {
     address.footprint(club)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SwingSpec {
-    pub target_power: Real,
-    pub power_cap: Real,
-    pub meter_rate_per_s: Real,
-    pub tempo_ratio: Real,
-    pub ring_min_s: Real,
-    pub ring_max_s: Real,
-    pub window_early_s: Real,
-    pub window_late_s: Real,
-    pub timeout_after_s: Real,
-    pub strike_mode: StrikeMode,
-    pub drift_bias_m: Vec2,
-    pub drift_start_sd_m: Vec2,
-    pub drift_slide_sd_mps: Vec2,
-    pub steer_vertical: bool,
-    pub downswing_slide_gain: Real,
-    pub wobble_m: Vec2,
-}
-
 pub fn swing_spec(input: &StrokeInput, assists: Assists) -> SwingSpec {
     let delivery = &input.delivery;
     let lie = &delivery.lie;
@@ -110,9 +91,7 @@ pub fn swing_spec(input: &StrokeInput, assists: Assists) -> SwingSpec {
     let scale_drift = |value: Vec2| Vec2::new(value.x, value.y * vertical) * drift;
     SwingSpec {
         target_power: address.swing_length,
-        power_cap: 1.1,
         meter_rate_per_s: t::METER_RATE_PER_S,
-        tempo_ratio: 3.0,
         ring_min_s: t::RING_MIN_S,
         ring_max_s: t::RING_MAX_S,
         window_early_s: (window * (1.0 + lean)).max(t::MIN_WINDOW_S),
@@ -123,9 +102,13 @@ pub fn swing_spec(input: &StrokeInput, assists: Assists) -> SwingSpec {
         drift_start_sd_m: scale_drift(t::DRIFT_START_SD_M),
         drift_slide_sd_mps: scale_drift(t::DRIFT_SLIDE_SD_MPS),
         steer_vertical: delivery.on_a_peg(),
-        downswing_slide_gain: 3.0,
         wobble_m: scale_drift(t::DRIFT_WOBBLE_M),
+        ..SwingSpec::default()
     }
+}
+
+pub fn reticle_seed(attempt_seed: Seed) -> Seed {
+    attempt_seed.derive("reticle")
 }
 
 pub fn drop(

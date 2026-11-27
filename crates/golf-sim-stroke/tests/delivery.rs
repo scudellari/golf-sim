@@ -18,12 +18,13 @@ use golf_sim_physics::{
     values::{Contact, Delivery, Launch, Lie, ShotRequest},
 };
 use golf_sim_stroke::{
-    address::{Address, Assists, Intent, Preset, Setting, StrikeMode},
+    address::{Address, Assists, Intent, Preset, Setting},
     bag::{self, Group},
     delivery::{self, BuiltDelivery, DeliveryExecution, DeliveryInput},
     tuning,
     wrappers::{self, FlightAir, MownGround, StrikeQuality},
 };
+use golf_sim_swing::spec::StrikeMode;
 use golf_sim_testkit::tolerance;
 
 fn fixture() -> PathBuf {

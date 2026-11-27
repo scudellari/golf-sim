@@ -7,6 +7,7 @@ use golf_sim_base::{
 };
 use golf_sim_course::legal::StanceFootprint;
 use golf_sim_physics::{facade::standard_club, values::units::INCH};
+use golf_sim_swing::spec::StrikeMode;
 
 use crate::{
     bag::{self, Group},
@@ -354,13 +355,6 @@ impl Preset {
             ),
         ]
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum StrikeMode {
-    #[default]
-    Reticle,
-    None,
 }
 
 /// Player settings used to size the swing meter.

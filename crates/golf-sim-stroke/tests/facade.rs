@@ -24,11 +24,12 @@ use golf_sim_physics::{
     values::{Launch, ShotResult, Zone, units},
 };
 use golf_sim_stroke::{
-    address::{Address, Assists, StrikeMode},
+    address::{Address, Assists},
     delivery::{DeliveryExecution, DeliveryInput},
     results::{DropResult, Preview, StrokeResult},
-    stroke::{self, StrokeInput, SwingSpec},
+    stroke::{self, StrokeInput},
 };
+use golf_sim_swing::spec::{StrikeMode, SwingSpec};
 use golf_sim_testkit::tolerance;
 use golf_sim_validate::{Conditions, Corpus, Kind, Model, Quantities, Quantity, Status, Target};
 
