@@ -499,12 +499,11 @@ mod tests {
     #[test]
     fn reference_strokes() {
         let path = testdata().join("physics/strokes/fixture.bin");
-        let report = FixtureRun::read(&path, Some("physics"), &[])
-            .unwrap()
-            .check()
-            .unwrap();
-        assert!(report.checked > 0);
-        assert!(report.skipped.len() >= 16);
+        let fixture = FixtureRun::read(&path, Some("physics"), &[]).unwrap();
+        let case_count = fixture.cases().len();
+        let report = fixture.check().unwrap();
+        assert_eq!(report.checked + report.skipped.len(), case_count);
+        assert_eq!(report.skipped.len(), 16);
         assert!(report.discrete.is_empty(), "{report}");
         print!("{report}");
     }

@@ -13,11 +13,10 @@ use golf_sim_testkit::corpus::{FixtureRun, hole::assert_last_stroke};
 fn reference_observation() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/hole/observe/fixture.bin");
-    let report = FixtureRun::read(&path, Some("hole"), &[])
-        .unwrap()
-        .check()
-        .unwrap();
-    assert!(report.checked > 0);
+    let fixture = FixtureRun::read(&path, Some("hole"), &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked, case_count);
     assert!(
         report.discrete.is_empty() && report.skipped.is_empty(),
         "{report}"

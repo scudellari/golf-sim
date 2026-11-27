@@ -154,6 +154,11 @@ impl FixtureRun {
         })
     }
 
+    /// Cases from the loaded fixture, before projection or departure filtering.
+    pub fn cases(&self) -> impl ExactSizeIterator<Item = &Dict> {
+        projection::rows(&self.header)
+    }
+
     pub fn check(self) -> Result<CheckReport> {
         self.check_observing(|_| {})
     }

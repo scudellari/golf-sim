@@ -15,13 +15,12 @@ use golf_sim_testkit::corpus::{FixtureRun, rules::outside_bunker_case};
 fn relief_matches_reference() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/rules/relief/fixture.bin");
-    let report = FixtureRun::read(&path, Some("rules"), &[])
-        .unwrap()
-        .check()
-        .unwrap();
-    assert!(report.checked > 0);
+    let fixture = FixtureRun::read(&path, Some("rules"), &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked + report.skipped.len(), case_count);
     assert!(report.discrete.is_empty(), "{report}");
-    assert!(report.skipped.len() >= 2);
+    assert_eq!(report.skipped.len(), 2);
     print!("{report}");
 }
 

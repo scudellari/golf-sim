@@ -113,6 +113,7 @@ fn exact_golfer_matches_most_reference_scores() {
         }
     }
     assert_eq!(actual.len(), 30);
+    assert!(expected.keys().eq(actual.keys()));
     let mismatches: Vec<_> = actual
         .iter()
         .filter_map(|(id, played)| {

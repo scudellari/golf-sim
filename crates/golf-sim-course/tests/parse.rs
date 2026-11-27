@@ -24,11 +24,10 @@ fn bundle_dir() -> PathBuf {
 #[test]
 fn course_grids_match_reference_probes() {
     let path = testdata().join("course/grids/fixture.bin");
-    let report = corpus::FixtureRun::read(&path, None, &[])
-        .unwrap()
-        .check()
-        .unwrap();
-    assert!(report.checked > 0);
+    let fixture = corpus::FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked, case_count);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
     print!("{report}");

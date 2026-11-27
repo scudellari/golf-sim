@@ -30,8 +30,9 @@ fn field<'a>(record: &'a Dict, key: &str) -> &'a Variant {
 fn values_match_physics_fixture() {
     let mut ground_cases = 0;
     let mut playback_cases = 0;
-    let report = FixtureRun::read(&fixture_path(), None, &[])
-        .unwrap()
+    let fixture = FixtureRun::read(&fixture_path(), None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture
         .check_observing(|case| match field(case, "call").as_str().unwrap() {
             "sim_plane_ground.height_at" | "sim_plane_ground.sample_ground" => ground_cases += 1,
             "sim_shot_result.position_at" => playback_cases += 1,
@@ -47,7 +48,8 @@ fn values_match_physics_fixture() {
             _ => {}
         })
         .unwrap_or_else(|error| panic!("{error}"));
-    assert!(report.checked > 0);
+    assert_eq!(report.checked + report.skipped.len(), case_count);
+    assert_eq!(report.skipped.len(), 1);
     print!("{report}");
     println!(
         "{ground_cases} plane heights and samples and {playback_cases} position_at cases passed the physics tolerance"

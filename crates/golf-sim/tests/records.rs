@@ -80,7 +80,7 @@ fn reference(case: &Dict, course: &Course) -> ReferenceHoleRecord {
 fn format_four_decodes_every_reference_record() {
     let course = Course::open(&testdata().join("courses/test-course")).unwrap();
     let cases = fixture();
-    assert!(!cases.is_empty());
+    assert_eq!(cases.len(), 30);
     for case in &cases {
         let case = case.as_dict().unwrap();
         let id = field(case, "id").as_str().unwrap();
@@ -181,7 +181,7 @@ fn exact_record(reference: &ReferenceHoleRecord) -> HoleRecord {
 fn format_five_round_trips_every_reference_record() {
     let course = Course::open(&testdata().join("courses/test-course")).unwrap();
     let cases = fixture();
-    assert!(!cases.is_empty());
+    assert_eq!(cases.len(), 30);
     let mut strokes = 0;
     let mut decisions = 0;
     for case in &cases {

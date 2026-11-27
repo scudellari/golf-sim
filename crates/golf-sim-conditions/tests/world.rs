@@ -24,12 +24,11 @@ fn testdata() -> std::path::PathBuf {
 #[test]
 fn matches_world_fixture() {
     let path = testdata().join("world/constant/fixture.bin");
-    let report = fixture_corpus::FixtureRun::read(&path, None, &[])
-        .unwrap()
-        .check()
-        .unwrap();
+    let fixture = fixture_corpus::FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
     print!("{report}");
-    assert!(report.checked > 0);
+    assert_eq!(report.checked, case_count);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
 }

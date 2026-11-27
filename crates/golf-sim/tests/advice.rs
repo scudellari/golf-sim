@@ -44,11 +44,10 @@ fn preview_uses_the_address_and_target() {
 #[test]
 fn reference_advice_and_actions() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/hole/advice/fixture.bin");
-    let report = FixtureRun::read(&path, Some("hole"), &[])
-        .unwrap()
-        .check()
-        .unwrap();
-    assert!(report.checked > 0);
+    let fixture = FixtureRun::read(&path, Some("hole"), &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked, case_count);
     assert!(
         report.discrete.is_empty() && report.skipped.is_empty(),
         "{report}"

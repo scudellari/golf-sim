@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, path::Path};
 
-use golf_sim_base::{PromptKind, Surface, Vec3};
+use golf_sim_base::{PromptKind, Surface, Vec3, variant::Dict};
 use golf_sim_course::legal::Area;
 use golf_sim_rules::{rulings::RulesRefusal, transitions};
 use golf_sim_stroke::results::{End, StrokeOutcome};
@@ -35,12 +35,16 @@ fn transitions_match_reference() {
     let path = testdata.join("rules/transitions/fixture.bin");
     let mut calls = BTreeSet::new();
     let mut relief_cases = 0;
-    let report = FixtureRun::read(&path, Some("rules"), &[])
-        .unwrap()
+    let fixture = FixtureRun::read(&path, Some("rules"), &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let is_relief =
+        |case: &Dict| RELIEF_CALLS.contains(&case.get("call").unwrap().as_str().unwrap());
+    let expected_relief = fixture.cases().filter(|case| is_relief(case)).count();
+    let report = fixture
         .check_observing(|case| {
             let call = case.get("call").unwrap().as_str().unwrap();
             calls.insert(call.to_owned());
-            relief_cases += usize::from(RELIEF_CALLS.contains(&call));
+            relief_cases += usize::from(is_relief(case));
         })
         .unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(
@@ -51,8 +55,8 @@ fn transitions_match_reference() {
             .map(str::to_owned)
             .collect()
     );
-    assert!(report.checked > 0);
-    assert!(relief_cases >= 83);
+    assert_eq!(report.checked, case_count);
+    assert_eq!(relief_cases, expected_relief);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
     print!("{report}");

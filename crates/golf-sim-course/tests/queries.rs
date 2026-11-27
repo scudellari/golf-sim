@@ -12,11 +12,10 @@ fn testdata() -> PathBuf {
 #[test]
 fn course_queries_match_reference() {
     let path = testdata().join("course/queries/fixture.bin");
-    let report = corpus::FixtureRun::read(&path, None, &[])
-        .unwrap()
-        .check()
-        .unwrap();
-    assert!(report.checked > 0);
+    let fixture = corpus::FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked, case_count);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
     print!("{report}");

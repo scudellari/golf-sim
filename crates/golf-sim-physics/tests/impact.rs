@@ -28,8 +28,9 @@ fn testdata() -> PathBuf {
 fn matches_impact_fixture() {
     let path = testdata().join("physics/impact/fixture.bin");
     let mut checked_spin_loft = 0;
-    let report = FixtureRun::read(&path, None, &[])
-        .unwrap()
+    let fixture = FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture
         .check_observing(|case| {
             let id = case.get("id").and_then(Variant::as_str).unwrap();
             if impact_fixture::SPIN_LOFT_CASES.contains(&id) {
@@ -44,7 +45,7 @@ fn matches_impact_fixture() {
             }
             panic!("{error}");
         });
-    assert!(report.checked > 0);
+    assert_eq!(report.checked, case_count);
     assert_eq!(checked_spin_loft, impact_fixture::SPIN_LOFT_CASES.len());
     assert!(report.skipped.is_empty());
     assert!(report.discrete.is_empty());

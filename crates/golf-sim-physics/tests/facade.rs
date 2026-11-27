@@ -21,42 +21,16 @@ fn testdata() -> PathBuf {
 #[test]
 fn matches_facade_fixture() {
     let path = testdata().join("physics/facade/fixture.bin");
-    let mut golden = 0;
-    let report = corpus::FixtureRun::read(&path, None, &[])
-        .unwrap()
-        .check_observing(|case| {
-            let id = case.get("id").and_then(Variant::as_str).unwrap();
-            if id.contains("/test_golden_stroke_is_unchanged/")
-                && case.get("call").and_then(Variant::as_str) == Some("golf_sim.simulate_shot")
-            {
-                golden += 1;
-            }
-        })
-        .unwrap();
-    assert_eq!(golden, 1);
-    assert!(report.checked > 0);
-    let generated: Vec<_> = report
-        .skipped
-        .iter()
-        .filter(|entry| entry.change == "requires the day generator")
-        .map(|entry| entry.id.as_str())
-        .collect();
-    for id in [
+    let fixture = corpus::FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let expected_generated = [
         "play/test-course/2/000054",
         "play/test-course/2/011592",
         "play/test-course/2/017232",
-    ] {
-        assert!(generated.contains(&id), "{id}");
-    }
-    let fixture = golf_sim_base::corpus::read(&path).unwrap();
-    let Some(Variant::Array(cases)) = fixture.as_dict().unwrap().get("cases") else {
-        panic!("expected fixture cases");
-    };
-    assert_eq!(cases.items.len(), report.checked + report.skipped.len());
-    for case in &cases.items {
-        let case = case.as_dict().unwrap();
+    ];
+    for case in fixture.cases() {
         let id = case.get("id").and_then(Variant::as_str).unwrap();
-        if generated.contains(&id) {
+        if expected_generated.contains(&id) {
             let input = case.get("input").and_then(Variant::as_dict).unwrap();
             for (name, kind) in [
                 ("conditions", "generated_air"),
@@ -74,6 +48,27 @@ fn matches_facade_fixture() {
             }
         }
     }
+    let mut golden = 0;
+    let report = fixture
+        .check_observing(|case| {
+            let id = case.get("id").and_then(Variant::as_str).unwrap();
+            if id.contains("/test_golden_stroke_is_unchanged/")
+                && case.get("call").and_then(Variant::as_str) == Some("golf_sim.simulate_shot")
+            {
+                golden += 1;
+            }
+        })
+        .unwrap();
+    assert_eq!(golden, 1);
+    assert_eq!(report.checked + report.skipped.len(), case_count);
+    assert_eq!(report.skipped.len(), 18);
+    let generated: Vec<_> = report
+        .skipped
+        .iter()
+        .filter(|entry| entry.change == "requires the day generator")
+        .map(|entry| entry.id.as_str())
+        .collect();
+    assert_eq!(generated, expected_generated);
     print!("{report}");
 }
 

@@ -23,9 +23,11 @@ fn testdata() -> PathBuf {
 #[test]
 fn contact_matches_physics_fixture() {
     let path = testdata().join("physics/contact/fixture.bin");
-    match FixtureRun::read(&path, None, &[]).unwrap().check() {
+    let fixture = FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    match fixture.check() {
         Ok(report) => {
-            assert!(report.checked > 0);
+            assert_eq!(report.checked, case_count);
             assert!(report.skipped.is_empty());
             println!("{report}");
         }

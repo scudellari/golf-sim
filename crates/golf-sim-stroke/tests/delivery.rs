@@ -31,11 +31,10 @@ fn fixture() -> PathBuf {
 
 #[test]
 fn every_recorded_delivery_matches() {
-    let report = fixture_corpus::FixtureRun::read(&fixture(), None, &[])
-        .unwrap()
-        .check()
-        .unwrap();
-    assert!(report.checked > 0);
+    let fixture = fixture_corpus::FixtureRun::read(&fixture(), None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked, case_count);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
     print!("{report}");

@@ -27,14 +27,15 @@ fn testdata() -> PathBuf {
 fn every_recorded_stroke_call_matches() {
     let path = testdata().join("stroke/facade/fixture.bin");
     let mut counts = std::collections::BTreeMap::new();
-    let report = corpus::FixtureRun::read(&path, None, &[])
-        .unwrap()
+    let fixture = corpus::FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture
         .check_observing(|case| {
             let call = case.get("call").and_then(Variant::as_str).unwrap();
             *counts.entry(call.to_owned()).or_insert(0) += 1;
         })
         .unwrap();
-    assert!(report.checked > 0);
+    assert_eq!(report.checked, case_count);
     assert!(report.skipped.is_empty());
     assert!(report.discrete.is_empty(), "{report}");
     print!("{report}");

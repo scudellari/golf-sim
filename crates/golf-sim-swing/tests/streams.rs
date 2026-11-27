@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use golf_sim_base::variant::Variant;
+use golf_sim_base::variant::{Dict, Variant};
 use golf_sim_testkit::corpus::{FixtureRun, swing};
 
 fn fixture() -> PathBuf {
@@ -9,18 +9,21 @@ fn fixture() -> PathBuf {
 
 #[test]
 fn every_recorded_swing_matches() {
+    let fixture = FixtureRun::read(&fixture(), Some("swing"), &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let is_golfer = |case: &Dict| {
+        let input = case.get("input").unwrap().as_dict().unwrap();
+        input.get("golfer").and_then(Variant::as_str) == Some("hole_kit")
+    };
+    let expected_golfer_cases = fixture.cases().filter(|case| is_golfer(case)).count();
     let mut golfer_cases = 0;
-    let report = FixtureRun::read(&fixture(), Some("swing"), &[])
-        .unwrap()
+    let report = fixture
         .check_observing(|case| {
-            let input = case.get("input").unwrap().as_dict().unwrap();
-            if input.get("golfer").and_then(Variant::as_str) == Some("hole_kit") {
-                golfer_cases += 1;
-            }
+            golfer_cases += usize::from(is_golfer(case));
         })
         .unwrap();
-    assert!(report.checked > 0);
-    assert!(golfer_cases >= 56);
+    assert_eq!(report.checked, case_count);
+    assert_eq!(golfer_cases, expected_golfer_cases);
     assert!(
         report.skipped.is_empty() && report.discrete.is_empty(),
         "{report}"
@@ -30,13 +33,14 @@ fn every_recorded_swing_matches() {
 
 #[test]
 fn advance_cadence_preserves_every_execution() {
+    let fixture = FixtureRun::read(&fixture(), Some("swing"), &[]).unwrap();
+    let case_count = fixture.cases().len();
     let mut checked = 0;
-    FixtureRun::read(&fixture(), Some("swing"), &[])
-        .unwrap()
+    fixture
         .check_observing(|case| {
             swing::check_cadence(case);
             checked += 1;
         })
         .unwrap();
-    assert!(checked > 0);
+    assert_eq!(checked, case_count);
 }

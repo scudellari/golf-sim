@@ -14,7 +14,7 @@ use super::Result;
 
 pub(super) type Pair = (Variant, Variant);
 
-pub(super) fn rows(header: &Dict) -> impl Iterator<Item = &Dict> {
+pub(super) fn rows(header: &Dict) -> impl ExactSizeIterator<Item = &Dict> {
     let Some(Variant::Array(cases)) = header.get("cases") else {
         unreachable!("validated fixture cases");
     };

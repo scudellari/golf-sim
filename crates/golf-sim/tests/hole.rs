@@ -22,15 +22,15 @@ fn testdata() -> PathBuf {
 
 #[test]
 fn reference_holes() {
-    let report = FixtureRun::read(
+    let fixture = FixtureRun::read(
         &testdata().join("records/holes/fixture.bin"),
         Some("records"),
         &[],
     )
-    .unwrap()
-    .check()
     .unwrap();
-    assert!(report.checked > 0);
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap();
+    assert_eq!(report.checked, case_count);
     assert!(report.skipped.is_empty());
     print!("{report}");
 }

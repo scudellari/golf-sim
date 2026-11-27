@@ -11,19 +11,36 @@ use golf_sim_swing::{
     hands::{Profile, Swing, exact, skill},
     spec::{StrikeMode, SwingSpec},
 };
-use golf_sim_testkit::tolerance;
+use golf_sim_testkit::{corpus::FixtureRun, tolerance};
 
 #[test]
 fn exact_swings_match_recorded_power_and_timing() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/swing/streams/fixture.bin");
+    let fixture = FixtureRun::read(&path, Some("swing"), &[]).unwrap();
+    let is_golfer =
+        |input: &Dict| input.get("golfer").and_then(Variant::as_str) == Some("hole_kit");
+    let recorded_strike = |output: &Dict| {
+        let recorded = dict(output, "execution");
+        let Variant::Vector2(strike) = recorded.get("strike_m").unwrap() else {
+            panic!("expected a strike vector");
+        };
+        Vec2::new(strike.values[0], strike.values[1])
+    };
+    let (expected_golfer_cases, expected_off_centre) = fixture
+        .cases()
+        .filter(|case| is_golfer(dict(case, "input")))
+        .fold((0, 0), |(total, off_centre), case| {
+            let strike = recorded_strike(dict(case, "output"));
+            (total + 1, off_centre + usize::from(strike != Vec2::ZERO))
+        });
     let mut golfer_cases = 0;
     let mut off_centre = 0;
     let mut largest_strike_m: Real = 0.0;
     let report = tolerance::check(&path, "swing", |case| {
         let input = dict(case, "input");
         let mut output = dict(case, "output").clone();
-        if input.get("golfer").and_then(Variant::as_str) != Some("hole_kit") {
+        if !is_golfer(input) {
             return Ok::<_, Infallible>(Variant::Dict(output));
         }
         golfer_cases += 1;
@@ -47,11 +64,7 @@ fn exact_swings_match_recorded_power_and_timing() {
         assert_eq!(actual.impact_usec, integer(recorded, "impact_usec"), "{id}");
         assert_eq!(actual.strike_m, centre, "{id}");
 
-        let Variant::Vector2(strike) = recorded.get("strike_m").unwrap() else {
-            panic!("{id}: expected a strike vector");
-        };
-        let [x, y] = strike.values;
-        let recorded_strike = Vec2::new(x, y);
+        let recorded_strike = recorded_strike(&output);
         if recorded_strike != Vec2::ZERO {
             assert!(centre.is_some(), "{id}: strike input disabled");
             off_centre += 1;
@@ -72,8 +85,9 @@ fn exact_swings_match_recorded_power_and_timing() {
     })
     .unwrap_or_else(|error| panic!("{error}"));
 
-    assert!(golfer_cases >= 56);
-    assert!(off_centre >= 33);
+    assert_eq!(report.checked, fixture.cases().len());
+    assert_eq!(golfer_cases, expected_golfer_cases);
+    assert_eq!(off_centre, expected_off_centre);
     assert!(report.skipped.is_empty(), "{report}");
     assert!(report.discrete.is_empty(), "{report}");
     println!("{golfer_cases} exact swings matched recorded power and timing");

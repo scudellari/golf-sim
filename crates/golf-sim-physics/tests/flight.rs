@@ -24,18 +24,17 @@ fn testdata() -> PathBuf {
 #[test]
 fn matches_flight_fixture() {
     let path = testdata().join("physics/flight/fixture.bin");
-    let report = FixtureRun::read(&path, None, &[])
-        .unwrap()
-        .check()
-        .unwrap_or_else(|error| {
-            if let Ok(fixture) = FixtureRun::read(&path, None, &[])
-                && let Ok(drift) = fixture.drift()
-            {
-                eprint!("{drift}");
-            }
-            panic!("{error}");
-        });
-    assert!(report.checked > 0);
+    let fixture = FixtureRun::read(&path, None, &[]).unwrap();
+    let case_count = fixture.cases().len();
+    let report = fixture.check().unwrap_or_else(|error| {
+        if let Ok(fixture) = FixtureRun::read(&path, None, &[])
+            && let Ok(drift) = fixture.drift()
+        {
+            eprint!("{drift}");
+        }
+        panic!("{error}");
+    });
+    assert_eq!(report.checked, case_count);
     assert!(report.skipped.is_empty());
     assert!(report.discrete.is_empty());
     print!("{report}");

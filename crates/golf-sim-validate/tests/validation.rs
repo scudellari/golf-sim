@@ -5,9 +5,10 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use golf_sim_base::local_data;
 use golf_sim_validate::{
-    Conditions, Corpus, Kind, Model, Quantities, Quantity, Report, Role, Scorecard, ScorecardDiff,
-    Status, Submodel, Target, Verdict,
+    Conditions, Corpus, Kind, Ledger, Model, Quantities, Quantity, Report, Role, Scorecard,
+    ScorecardDiff, Status, Submodel, Target, TargetFile, Verdict,
 };
 use serde_json::{Value, json};
 
@@ -22,10 +23,32 @@ fn earlier(target: &Target, _: &Conditions) -> Option<Quantities> {
 #[test]
 fn committed_corpus_loads_reports_and_scores() {
     let corpus = Corpus::load_default(None).unwrap();
-    let targets: Vec<_> = corpus
-        .files()
-        .iter()
-        .flat_map(|file| &file.targets)
+    let public = local_data::workspace_testdata().join("validation/targets");
+    let local = local_data::resolve()
+        .unwrap()
+        .map(|root| root.join("validation/targets"));
+    let mut files = BTreeSet::new();
+    for directory in std::iter::once(public).chain(local) {
+        let ledger: Ledger =
+            toml::from_str(&fs::read_to_string(directory.join("LICENCES.toml")).unwrap()).unwrap();
+        files.extend(
+            ledger
+                .datasets
+                .into_values()
+                .filter(|dataset| dataset.verdict != Verdict::Excluded)
+                .flat_map(|dataset| dataset.files)
+                .map(|file| directory.join(file))
+                .filter(|file| file.is_file() && file.extension().is_some_and(|ext| ext == "json")),
+        );
+    }
+    assert_eq!(corpus.files().len(), files.len());
+    let targets: Vec<_> = files
+        .into_iter()
+        .flat_map(|file| {
+            serde_json::from_slice::<TargetFile>(&fs::read(file).unwrap())
+                .unwrap()
+                .targets
+        })
         .collect();
     assert!(!targets.is_empty());
     let checked = targets

@@ -12,6 +12,7 @@ use std::{
 use golf_sim_base::{
     corpus,
     digest::{object, sha256_hex},
+    local_data,
     variant::{self, Array, Components, FloatWidth, Variant},
 };
 use golf_sim_testkit::tolerance::{self, Fixture};
@@ -42,6 +43,60 @@ fn golf_binary() -> &'static Path {
 
 fn text(bytes: &[u8]) -> &str {
     std::str::from_utf8(bytes).unwrap()
+}
+
+#[test]
+fn merged_fixtures_preserve_every_case_in_id_order() {
+    let Some(local) = local_data::resolve().unwrap() else {
+        return;
+    };
+    let fixtures = local.join("fixtures");
+    if !fixtures.try_exists().unwrap() {
+        return;
+    }
+    let ledger = fs::read_to_string(fixtures.join("LICENCES.toml")).unwrap();
+    let ledger: toml::Table = toml::from_str(&ledger).unwrap();
+    let Some(entries) = ledger.get("fixtures") else {
+        return;
+    };
+    for key in entries.as_table().unwrap().keys() {
+        let relative = Path::new(key).join("fixture.bin");
+        let public_path = workspace().join("testdata").join(&relative);
+        let public = corpus::read_with_local(&public_path, None).unwrap();
+        let extra = corpus::read_with_local(&fixtures.join(relative), None).unwrap();
+        let merged = corpus::read(&public_path).unwrap();
+
+        let mut expected: Vec<_> = fixture_cases(&public)
+            .iter()
+            .chain(fixture_cases(&extra))
+            .collect();
+        expected.sort_by_key(|case| fixture_case_id(case));
+        assert!(
+            expected
+                .windows(2)
+                .all(|pair| fixture_case_id(pair[0]) < fixture_case_id(pair[1])),
+            "{key}: duplicate case id"
+        );
+        let actual = fixture_cases(&merged);
+        assert_eq!(actual.len(), expected.len(), "{key}");
+        for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                corpus::first_difference(expected, actual).is_none(),
+                "{key}: merged case {index} differs"
+            );
+        }
+    }
+}
+
+fn fixture_cases(fixture: &Variant) -> &[Variant] {
+    let Some(Variant::Array(cases)) = fixture.as_dict().unwrap().get("cases") else {
+        panic!("expected fixture cases");
+    };
+    &cases.items
+}
+
+fn fixture_case_id(case: &Variant) -> &str {
+    case.as_dict().unwrap().get("id").unwrap().as_str().unwrap()
 }
 
 #[test]
@@ -814,7 +869,7 @@ abs = 0.0
 rel = 0.0
 discrete_share = 0.0
 
-["physics/strokes"]
+["physics/probe-override"]
 abs = 0.125
 rel = 0.0
 f32_steps = 2
@@ -838,12 +893,12 @@ discrete_share = 0.0
         );
     };
     let run = |_: &variant::Dict| Ok::<_, Infallible>(1.125.into());
-    write("physics/strokes");
+    write("physics/probe-override");
     assert_eq!(tolerance::check(&path, "physics", run).unwrap().checked, 1);
     let drift = Fixture::read(&path).unwrap().drift("physics", run).unwrap();
     assert_eq!(drift.numeric["$"].steps.size, 131_072.0);
 
-    write("physics/contact");
+    write("physics/probe-default");
     let error = tolerance::check(&path, "physics", run).unwrap_err();
     assert!(error.to_string().contains("abs 1.25e-1"), "{error}");
     let drift = Fixture::read(&path).unwrap().drift("physics", run).unwrap();
