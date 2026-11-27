@@ -50,6 +50,8 @@ Compare the core's results with the reference implementation's recorded data wit
 
 Each crate owns one layer of the domain, and a crate may use only the crates below it. The table in [Crates](docs/design/core.md#crates) lists them. Every module the plan names already exists as a stub, so fill the files your change names and leave each `lib.rs`, `main.rs` and `Cargo.toml` alone. Each `golf` subcommand lives in its own file under `crates/golf-sim-cli/src/cmd/`, which defines that file's `Command` enum and its `run` function.
 
+Keep hot paths free of macros that hide control flow from a debugger. See the [debugging guide](docs/how-to/debug.md) for replay and breakpoint steps.
+
 ## Commits
 
 - Use a conventional prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `test:` or `chore:`.

@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "golf replay",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--offline", "-p", "golf-sim-cli", "--bin", "golf", "--profile", "debugging"],
+        "filter": { "name": "golf", "kind": "bin" }
+      },
+      "program": "${cargo:program}",
+      "args": ["replay", "testdata/bundles/lip-out"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Attach to Godot",
+      "type": "lldb",
+      "request": "attach",
+      "pid": "${command:pickMyProcess}"
+    }
+  ]
+}
