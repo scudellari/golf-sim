@@ -9,4 +9,4 @@ mod trajectory;
 pub(super) mod values;
 
 pub use facade::shot_snapshot;
-pub(super) use facade::{replay as facade, strokes};
+pub(super) use facade::{replay as facade, strokes, verify_delivery};

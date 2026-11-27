@@ -70,7 +70,7 @@ impl Bounds {
 
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Layer {
+pub(crate) struct Layer {
     abs: Real,
     rel: Real,
     discrete_share: Real,
@@ -97,6 +97,45 @@ impl Layer {
             return Err(format!("{}: invalid bounds for layer {name:?}", path.display()).into());
         }
         Ok(Some(layer))
+    }
+
+    pub(crate) fn for_fixture(testdata: &Path, key: &str) -> CorpusResult<Self> {
+        let layer = key.split_once('/').map_or(key, |(layer, _)| layer);
+        Self::load(&testdata.join(TOLERANCES), key, layer)?
+            .ok_or_else(|| format!("no tolerances for {key:?}").into())
+    }
+
+    pub(crate) fn checkpoint_difference(
+        &self,
+        expected: &Variant,
+        actual: &Variant,
+        prefix: &str,
+    ) -> Option<String> {
+        let default = self.default_bounds();
+        let values = OnceCell::new();
+        corpus::first_difference_with(expected, actual, |path| {
+            let full = if path == "$" {
+                prefix.to_owned()
+            } else if prefix.is_empty() {
+                path.to_owned()
+            } else {
+                numeric_path(prefix, path)
+            };
+            let field = self.bounds_for(&full);
+            let row = field.unwrap_or(&default);
+            // The stroke checkpoint rows have no external scale sources.
+            assert!(row.scale_from.is_empty());
+            let measurement = if self.scalar_ulps.is_some() || row.f32_steps.is_some() {
+                let fields = values.get_or_init(|| OutputFields::new(expected, actual));
+                fields
+                    .numeric(|_| 1.0)
+                    .find(|(key, ..)| *key == path)
+                    .map(|(_, a, b, delta)| (a, b, delta))
+            } else {
+                None
+            };
+            self.numeric_tolerance(field, row, measurement)
+        })
     }
 
     fn default_bounds(&self) -> Bounds {
@@ -852,8 +891,8 @@ pub(crate) struct Departures {
 pub(crate) struct PrecisionDepartureRule {
     pub fixture: String,
     pub call: String,
-    pub id_sha256: String,
-    pub change: String,
+    pub ids_sha256: BTreeSet<String>,
+    pub threshold: String,
 }
 
 #[derive(Deserialize)]
@@ -905,9 +944,8 @@ pub(crate) enum CaseOutcome {
         first: crate::corpus::physics::models::AffectedEvent,
         change: &'static str,
     },
-    StopTickDeparture {
+    PrecisionDeparture {
         actual: Variant,
-        step_scale: Real,
         change: String,
     },
     Refused(String),
@@ -924,30 +962,6 @@ impl From<Variant> for CaseOutcome {
             departures: Vec::new(),
         }
     }
-}
-
-fn check_stop_tick(
-    case: &Case<'_>,
-    expected: &Variant,
-    actual: &Variant,
-    step_scale: Real,
-    change: String,
-    limits: &Layer,
-) -> CorpusResult<Departure> {
-    let aligned = crate::corpus::physics::playback::align_stop_tick(expected, actual, step_scale)?;
-    if let Some(difference) =
-        compare_case(case, &aligned.expected, &aligned.actual, limits, false)?.0
-    {
-        return Err(format!(
-            "unaffected output differs after aligning the rest tick: {difference}"
-        )
-        .into());
-    }
-    Ok(Departure {
-        id: case.id().into(),
-        layer: case.layer.into(),
-        change: format!("{change}; {:.9} s tick; {}", aligned.tick, aligned.first),
-    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1147,19 +1161,12 @@ impl Fixture {
             };
             let (actual, departures) = match outcome {
                 CaseOutcome::Compared { actual, departures } => (actual, departures),
-                CaseOutcome::StopTickDeparture {
-                    actual,
-                    step_scale,
-                    change,
-                } => {
-                    let expected = case.expected()?;
-                    match check_stop_tick(&case, &expected, &actual, step_scale, change, &limits) {
-                        Ok(departure) => report.skipped.push(departure),
-                        Err(error) => {
-                            report.checked += 1;
-                            report.failures.push(case.run_error(error));
-                        }
-                    }
+                CaseOutcome::PrecisionDeparture { change, .. } => {
+                    report.skipped.push(Departure {
+                        id: case.id().into(),
+                        layer: layer.into(),
+                        change,
+                    });
                     continue;
                 }
                 CaseOutcome::ModelDeparture {
@@ -1321,15 +1328,12 @@ impl Fixture {
                     report.field_departures.extend(departures);
                     actual
                 }
-                Ok(CaseOutcome::StopTickDeparture {
-                    actual,
-                    step_scale,
-                    change,
-                }) => {
-                    match check_stop_tick(&case, &expected, &actual, step_scale, change, &limits) {
-                        Ok(departure) => report.skipped.push(departure),
-                        Err(error) => report.failures.push(case.run_error(error)),
-                    }
+                Ok(CaseOutcome::PrecisionDeparture { actual, change }) => {
+                    report.skipped.push(Departure {
+                        id: case.id().into(),
+                        layer: layer.into(),
+                        change,
+                    });
                     actual
                 }
                 Ok(CaseOutcome::ModelDeparture {

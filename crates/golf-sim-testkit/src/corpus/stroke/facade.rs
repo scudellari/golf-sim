@@ -628,6 +628,26 @@ fn impact_request(input: &StrokeInput, execution: Execution, with_noise: bool) -
     request
 }
 
+pub(in crate::corpus) fn verify_delivery(
+    case: &Dict,
+    actual: &Variant,
+    course: Option<&Course>,
+) -> Result<(), String> {
+    let args = dict(field(case, "input"));
+    let world = crate::corpus::world::world(dict(field(args, "world")), course);
+    let input = stroke_input(dict(field(args, "input")));
+    let request = impact_request(&input, execution(dict(field(args, "execution"))), true);
+    fn launch(value: &Variant) -> &Dict {
+        dict(field(dict(field(dict(value), "playback")), "launch"))
+    }
+    crate::corpus::physics::impact::verify_strike_rounding(
+        launch(field(case, "output")),
+        launch(actual),
+        &request,
+        world.ground(),
+    )
+}
+
 fn check_derived_fields(
     case: &Dict,
     world: &World<'_>,

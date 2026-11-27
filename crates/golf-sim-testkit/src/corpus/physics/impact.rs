@@ -903,6 +903,44 @@ fn exceeds_strike_row(a: Real, b: Real, scale: Real) -> bool {
             .max(EIGHT_SINGLE_PRECISION_STEPS * scale)
 }
 
+pub(in crate::corpus) fn verify_strike_rounding(
+    expected: &Dict,
+    actual: &Dict,
+    request: &ShotRequest,
+    ground: &(impl GroundSampler + ?Sized),
+) -> Result<(), String> {
+    check_strike_fields(expected, actual)?;
+    let bounds = strike_bounds(request, ground, actual);
+    let a = vec3(expected, "position");
+    let b = vec3(actual, "position");
+    let position_bound = 4.0
+        * f32::EPSILON as Real
+        * [a.x, a.y, a.z, b.x, b.y, b.z]
+            .into_iter()
+            .map(Real::abs)
+            .fold(1.0, Real::max);
+    for (key, allowed) in [
+        ("position", [position_bound; 3]),
+        ("velocity", [bounds.velocity; 3]),
+        ("spin", bounds.spin),
+    ] {
+        let a = vec3(expected, key);
+        let b = vec3(actual, key);
+        for ((axis, delta), bound) in ["x", "y", "z"]
+            .into_iter()
+            .zip([(a.x - b.x).abs(), (a.y - b.y).abs(), (a.z - b.z).abs()])
+            .zip(allowed)
+        {
+            if !delta.is_finite() || !bound.is_finite() || delta > bound {
+                return Err(format!(
+                    "launch.{key}.{axis}: {delta:.6e} exceeds strike rounding bound {bound:.6e}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(in crate::corpus) fn compare_launch_rounding(
     case: &Dict,
     expected: &Dict,

@@ -10,13 +10,6 @@ const STEP: Real = f32::EPSILON as Real;
 const CLOCK_EPSILON: Real = 1e-9;
 const TIME_BOUND: Real = 1e-6;
 
-fn vector(fields: &Dict, key: &str) -> Option<[Real; 3]> {
-    let Variant::Vector3(value) = fields.get(key)? else {
-        return None;
-    };
-    Some(value.values)
-}
-
 fn code(fields: &Dict, key: &str) -> Option<i64> {
     let Variant::Int(value) = fields.get(key)? else {
         return None;
@@ -41,7 +34,6 @@ fn array<'a>(fields: &'a Dict, key: &str) -> Option<&'a [Variant]> {
 struct Playback<'a> {
     shot: &'a Dict,
     times: &'a [Real],
-    positions: &'a [[Real; 3]],
     events: &'a [Variant],
 }
 
@@ -60,7 +52,6 @@ impl<'a> Playback<'a> {
         Some(Self {
             shot,
             times,
-            positions: &positions.values,
             events: array(shot, "events")?,
         })
     }
@@ -81,103 +72,15 @@ impl<'a> Playback<'a> {
         }
         Some((start, stop))
     }
-
-    fn first_flight_sample_difference(&self, other: &Self) -> Result<String, String> {
-        let same_state = |a: &Dict, b: &Dict| {
-            ["position", "velocity", "spin"].into_iter().all(|key| {
-                vector(a, key)
-                    .zip(vector(b, key))
-                    .is_some_and(|(a, b)| a == b)
-            })
-        };
-        let same_origin = || {
-            let launch = self.shot.get("launch")?.as_dict()?;
-            let other_launch = other.shot.get("launch")?.as_dict()?;
-            let impact = self.events.first()?.as_dict()?;
-            let other_impact = other.events.first()?.as_dict()?;
-            Some(
-                same_state(launch, other_launch)
-                    && same_state(impact, other_impact)
-                    && code(impact, "kind")? == EventKind::Impact as i64
-                    && code(impact, "kind")? == code(other_impact, "kind")?
-                    && code(impact, "zone")? == code(other_impact, "zone")?
-                    && code(impact, "surface")? == code(other_impact, "surface")?
-                    && time(impact)? == 0.0
-                    && time(other_impact)? == 0.0,
-            )
-        };
-        if same_origin() != Some(true) {
-            return Err("launch or impact differs before the first flight sample".into());
-        }
-        for (index, ((&a_time, &b_time), (a, b))) in self
-            .times
-            .iter()
-            .zip(other.times)
-            .zip(self.positions.iter().zip(other.positions))
-            .enumerate()
-        {
-            if !a_time.is_finite()
-                || !b_time.is_finite()
-                || a.iter().chain(b).any(|value| !value.is_finite())
-            {
-                return Err("non-finite flight sample".into());
-            }
-            if a_time == b_time && a == b {
-                continue;
-            }
-            let cutoff = a_time.max(b_time);
-            let clear = |playback: &Self| {
-                playback
-                    .events
-                    .get(1)
-                    .and_then(Variant::as_dict)
-                    .and_then(time)
-                    .is_some_and(|stamp| stamp > cutoff)
-                    && array(playback.shot, "touchdowns")
-                        .and_then(|touches| touches.first())
-                        .and_then(Variant::as_dict)
-                        .and_then(time)
-                        .is_some_and(|stamp| stamp > cutoff)
-            };
-            if !clear(self) || !clear(other) {
-                return Err("an event precedes the first unequal flight sample".into());
-            }
-            let time_error = (a_time - b_time).abs();
-            let position_error = a
-                .iter()
-                .zip(b)
-                .map(|(a, b)| (a - b).abs())
-                .fold(0.0, Real::max);
-            let scale = a.iter().chain(b).map(|n| n.abs()).fold(1.0, Real::max);
-            let bound = 4.0 * STEP * scale;
-            let detail = format!(
-                "sample {index}: time difference {time_error:.6e} s (bound {TIME_BOUND:.1e} s), position difference {position_error:.6e} m (bound {bound:.6e} m)"
-            );
-            return if time_error <= TIME_BOUND && position_error <= bound {
-                Ok(detail)
-            } else {
-                Err(format!("first difference exceeds rounding: {detail}"))
-            };
-        }
-        Err("no differing flight sample".into())
-    }
 }
 
-pub(crate) struct Alignment {
-    pub expected: Variant,
-    pub actual: Variant,
-    pub first: String,
-    pub tick: Real,
-}
-
-pub(crate) fn align_stop_tick(
+fn align_tick(
     expected: &Variant,
     actual: &Variant,
     step_scale: Real,
-) -> Result<Alignment, String> {
+) -> Result<(Variant, Variant, Real), String> {
     let reference = Playback::read(expected).ok_or("reference playback is incomplete")?;
     let computed = Playback::read(actual).ok_or("core playback is incomplete")?;
-    let first = reference.first_flight_sample_difference(&computed)?;
     let (short, long, remove_expected) = match reference.times.len().cmp(&computed.times.len()) {
         std::cmp::Ordering::Less => (&reference, &computed, false),
         std::cmp::Ordering::Greater => (&computed, &reference, true),
@@ -241,12 +144,409 @@ pub(crate) fn align_stop_tick(
     } else {
         (expected.clone(), shorter)
     };
-    Ok(Alignment {
-        expected,
-        actual,
-        first,
-        tick,
+    Ok((expected, actual, tick))
+}
+
+fn response(kind: i64) -> Option<&'static str> {
+    Some(match kind {
+        k if k == EventKind::Landing as i64 => "contact",
+        k if k == EventKind::Bounce as i64 => "bounce",
+        k if k == EventKind::RollStart as i64 => "roll start",
+        k if k == EventKind::PureRoll as i64 => "pure roll",
+        k if k == EventKind::Obstacle as i64 => "obstacle contact",
+        k if k == EventKind::Canopy as i64 => "canopy entry",
+        k if k == EventKind::SurfaceEntered as i64 => "surface entry",
+        k if k == EventKind::ZoneEntered as i64 => "zone entry",
+        k if k == EventKind::CupEntry as i64 => "cup entry",
+        k if k == EventKind::LipOut as i64 => "lip out",
+        k if k == EventKind::Holed as i64 => "cup stop",
+        k if k == EventKind::Rest as i64 => "stop",
+        _ => return None,
     })
+}
+
+struct Checkpoint {
+    path: String,
+    a: Variant,
+    b: Variant,
+    time: Real,
+    response: Option<&'static str>,
+}
+
+impl Checkpoint {
+    fn field(&self, local: &str) -> String {
+        if local == "$" {
+            self.path.clone()
+        } else {
+            format!("{}.{local}", self.path)
+        }
+    }
+
+    fn first_difference(&self) -> Option<String> {
+        let local = golf_sim_base::corpus::first_difference(&self.a, &self.b)?;
+        let detail = if let Some((a, b, bound)) = self.numeric(&local) {
+            format!(" (delta {:.6e}, rounding bound {bound:.6e})", (a - b).abs())
+        } else {
+            " (discrete difference)".into()
+        };
+        Some(format!(
+            "{} at {:.9} s{detail}",
+            self.field(&local),
+            self.time
+        ))
+    }
+
+    fn numeric(&self, path: &str) -> Option<(Real, Real, Real)> {
+        let (field, axis) = if matches!(self.a, Variant::Vector3(_)) {
+            ("$", path)
+        } else {
+            path.split_once('.').unwrap_or((path, ""))
+        };
+        let get = |value: &Variant| -> Option<(Real, Real)> {
+            let value = if field == "$" {
+                value
+            } else {
+                value.as_dict()?.get(field)?
+            };
+            match value {
+                Variant::Float(value) => Some((value.value(), value.value().abs())),
+                Variant::Vector3(value) => {
+                    let index = ["x", "y", "z"].iter().position(|key| *key == axis)?;
+                    let scale = value
+                        .values
+                        .iter()
+                        .copied()
+                        .map(Real::abs)
+                        .fold(1.0, Real::max);
+                    Some((value.values[index], scale))
+                }
+                _ => None,
+            }
+        };
+        let (a, scale_a) = get(&self.a)?;
+        let (b, scale_b) = get(&self.b)?;
+        let bound = if self.path.starts_with("times[") || field == "time_s" {
+            TIME_BOUND
+        } else {
+            4.0 * STEP * scale_a.max(scale_b).max(1.0)
+        };
+        Some((a, b, bound))
+    }
+
+    fn rounding_difference(&self) -> Option<String> {
+        golf_sim_base::corpus::first_difference_with(&self.a, &self.b, |path| {
+            self.numeric(path)
+                .map(|(_, _, bound)| golf_sim_base::corpus::Tolerance {
+                    absolute: bound,
+                    relative: 0.0,
+                })
+        })
+    }
+}
+
+fn vector_variant(values: [Real; 3]) -> Variant {
+    use golf_sim_base::variant::{Components, FloatWidth};
+    Variant::Vector3(Components {
+        values,
+        width: FloatWidth::Double,
+    })
+}
+
+fn state(shot: &Dict) -> Variant {
+    let Some(launch) = shot.get("launch").and_then(Variant::as_dict) else {
+        return Variant::Nil;
+    };
+    golf_sim_base::digest::object(
+        ["position", "velocity", "spin", "aim", "valid", "contact"]
+            .into_iter()
+            .filter_map(|key| Some((key, launch.get(key)?.clone()))),
+    )
+}
+
+fn checkpoints(a: &Dict, b: &Dict) -> Vec<Checkpoint> {
+    let mut result = vec![Checkpoint {
+        path: "launch".into(),
+        a: state(a),
+        b: state(b),
+        time: 0.0,
+        response: None,
+    }];
+    let mut responses = [Vec::new(), Vec::new()];
+    for key in ["touchdowns", "events"] {
+        let reference = array(a, key).unwrap_or_default();
+        let computed = array(b, key).unwrap_or_default();
+        for i in 0..reference.len().max(computed.len()) {
+            let pair = [reference.get(i), computed.get(i)];
+            let stamps = pair.map(|event| {
+                let fields = event?.as_dict()?;
+                let stamp = time(fields)?;
+                let kind = if key == "touchdowns" {
+                    Some("contact")
+                } else {
+                    code(fields, "kind").and_then(response)
+                };
+                Some((stamp, kind))
+            });
+            for (timeline, stamp) in responses.iter_mut().zip(stamps) {
+                if let Some((stamp, Some(kind))) = stamp {
+                    timeline.push((stamp, kind));
+                }
+            }
+            // At equal clocks, either side may have emitted the response.
+            let Some((time, direct)) = stamps.into_iter().flatten().min_by(|a, b| {
+                a.0.total_cmp(&b.0)
+                    .then_with(|| b.1.is_some().cmp(&a.1.is_some()))
+            }) else {
+                continue;
+            };
+            let [a, b] = pair.map(|value| value.cloned().unwrap_or(Variant::Nil));
+            result.push(Checkpoint {
+                path: format!("{key}[{i}]"),
+                a,
+                b,
+                time,
+                response: direct,
+            });
+        }
+    }
+    let history = |stamp: Real, window: Real| {
+        responses
+            .iter()
+            .flatten()
+            .filter(|(when, _)| stamp - *when >= 0.0 && stamp - *when <= window + CLOCK_EPSILON)
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, kind)| *kind)
+    };
+    for checkpoint in &mut result[1..] {
+        checkpoint.response = checkpoint
+            .response
+            .or_else(|| history(checkpoint.time, t::FLIGHT_DT));
+    }
+    let samples = |shot: &Dict| -> Vec<(Real, [Real; 3])> {
+        match (shot.get("times"), shot.get("positions")) {
+            (
+                Some(Variant::PackedFloat64Array(times)),
+                Some(Variant::PackedVector3Array(positions)),
+            ) => times
+                .iter()
+                .copied()
+                .zip(positions.values.iter().copied())
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let reference = samples(a);
+    let computed = samples(b);
+    for i in 0..reference.len().max(computed.len()) {
+        let pair = [reference.get(i), computed.get(i)];
+        let time = pair
+            .into_iter()
+            .flatten()
+            .map(|(time, _)| *time)
+            .fold(Real::INFINITY, Real::min);
+        let response = history(time, t::SAMPLE_INTERVAL_S);
+        let [a, b] = pair.map(|value| value.map_or(Variant::Nil, |(time, _)| (*time).into()));
+        result.push(Checkpoint {
+            path: format!("times[{i}]"),
+            a,
+            b,
+            time,
+            response,
+        });
+        let [a, b] =
+            pair.map(|value| value.map_or(Variant::Nil, |(_, point)| vector_variant(*point)));
+        result.push(Checkpoint {
+            path: format!("positions[{i}]"),
+            a,
+            b,
+            time,
+            response,
+        });
+    }
+    result.sort_by(|a, b| a.time.total_cmp(&b.time));
+    result
+}
+
+pub(crate) struct Evidence {
+    pub first: String,
+    pub rounding: Result<(), String>,
+    pub over_bound: String,
+    pub threshold: Option<&'static str>,
+}
+
+pub(crate) fn evidence(
+    expected: &Variant,
+    raw: &Variant,
+    compared: &Variant,
+    limits: &crate::tolerance::Layer,
+    delivered: Option<Result<(), String>>,
+    step_scale: Real,
+) -> Result<Evidence, String> {
+    let shot = |value: &Variant| {
+        value
+            .as_dict()
+            .is_some_and(|fields| fields.get("playback").is_some())
+    };
+    let prefix = if shot(expected) { "playback." } else { "" };
+    let read = |value: &Variant| -> Option<()> {
+        playback(value)?.as_dict()?;
+        Some(())
+    };
+    for value in [expected, raw, compared] {
+        read(value).ok_or("missing shot checkpoints")?;
+    }
+    let dict = |value| playback(value).unwrap().as_dict().unwrap();
+    let raw_points = checkpoints(dict(expected), dict(raw));
+    let first = raw_points.iter().find_map(|point| {
+        point
+            .first_difference()
+            .map(|difference| (point.time, difference))
+    });
+    let first_time = first.as_ref().map(|(time, _)| *time);
+    let first = first.map_or_else(
+        || "no differing trajectory checkpoint".into(),
+        |(_, value)| value,
+    );
+    let rounding = delivered.unwrap_or_else(|| {
+        let time = first_time.ok_or("no differing trajectory checkpoint")?;
+        let beyond = raw_points
+            .iter()
+            .take_while(|point| point.time <= time)
+            .find_map(|point| Some(point.field(&point.rounding_difference()?)));
+        beyond.map_or(Ok(()), |path| {
+            Err(format!("first checkpoint exceeds float rounding at {path}"))
+        })
+    });
+
+    let mut ordinary = checkpoints(dict(expected), dict(compared));
+    // The raw first checkpoint uses the state propagated by flight. The normal
+    // comparison also checks launch readouts and metadata before any response.
+    include_launch_readouts(&mut ordinary, dict(expected), dict(compared));
+    let early_fields = [
+        ("fault", ""),
+        ("quality", ""),
+        ("fat", ""),
+        ("start", "outcome"),
+        ("ball_radius_m", "outcome"),
+    ];
+    if !prefix.is_empty() {
+        for (key, section) in early_fields {
+            let value = |output| field_at(output, section, key).unwrap_or(&Variant::Nil);
+            let path = if section.is_empty() {
+                key.into()
+            } else {
+                format!("{section}.{key}")
+            };
+            if limits
+                .checkpoint_difference(value(expected), value(compared), &path)
+                .is_some()
+            {
+                return Ok(Evidence {
+                    first,
+                    rounding,
+                    over_bound: format!("{path} before flight"),
+                    threshold: None,
+                });
+            }
+        }
+    }
+    for point in &ordinary {
+        let row = format!("{prefix}{}", point.path);
+        let Some(local) = limits.checkpoint_difference(&point.a, &point.b, &row) else {
+            continue;
+        };
+        let over_bound = format!("{} at {:.9} s", point.field(&local), point.time);
+        // A length mismatch at the end can arise when only one run samples the last roll tick.
+        if point.response == Some("stop")
+            && point.path.starts_with("times[")
+            && (point.a == Variant::Nil || point.b == Variant::Nil)
+            && let Ok((aligned_a, aligned_b, _)) = align_tick(
+                playback(expected).unwrap(),
+                playback(compared).unwrap(),
+                step_scale,
+            )
+            && limits
+                .checkpoint_difference(&aligned_a, &aligned_b, prefix.trim_end_matches('.'))
+                .is_none()
+        {
+            return Ok(Evidence {
+                first,
+                rounding,
+                over_bound,
+                threshold: Some("stop playback tick"),
+            });
+        }
+        return Ok(Evidence {
+            first,
+            rounding,
+            over_bound,
+            threshold: point.response,
+        });
+    }
+    let diff = limits
+        .checkpoint_difference(expected, compared, "")
+        .ok_or("the shot has no over-bound checkpoint")?;
+    let terminal = if [
+        "rest_position",
+        "rest_surface",
+        "end_reason",
+        "embedded",
+        "playback.rest_position",
+        "playback.rest_surface",
+        "playback.end_reason",
+        "playback.embedded",
+        "outcome.rest",
+        "outcome.rest_surface",
+        "outcome.end",
+        "outcome.total_m",
+    ]
+    .iter()
+    .any(|path| diff == *path || diff.starts_with(&format!("{path}.")))
+    {
+        ordinary
+            .iter()
+            .rev()
+            .find_map(|point| {
+                point
+                    .path
+                    .starts_with("events[")
+                    .then(|| point.a.as_dict().or_else(|| point.b.as_dict()))
+                    .flatten()
+            })
+            .and_then(|event| time(event).zip(code(event, "kind").and_then(response)))
+    } else {
+        None
+    };
+    Ok(Evidence {
+        first,
+        rounding,
+        over_bound: diff,
+        threshold: terminal.map(|(_, kind)| kind),
+    })
+}
+
+fn include_launch_readouts(points: &mut [Checkpoint], expected: &Dict, actual: &Dict) {
+    let launch = points
+        .iter_mut()
+        .find(|point| point.path == "launch")
+        .unwrap();
+    launch.a = expected.get("launch").cloned().unwrap_or(Variant::Nil);
+    launch.b = actual.get("launch").cloned().unwrap_or(Variant::Nil);
+}
+
+fn field_at<'a>(output: &'a Variant, section: &str, key: &str) -> Option<&'a Variant> {
+    let output = output.as_dict()?;
+    let fields = if section.is_empty() {
+        output
+    } else {
+        output.get(section)?.as_dict()?
+    };
+    fields.get(key)
+}
+
+fn playback(value: &Variant) -> Option<&Variant> {
+    let fields = value.as_dict()?;
+    Some(fields.get("playback").unwrap_or(value))
 }
 
 #[cfg(test)]
@@ -320,23 +620,41 @@ mod tests {
     fn extra_sample_requires_both_small_early_drift_and_bracketed_rest_tick() {
         let reference = shot(false, 0.0);
         let core = shot(true, STEP);
-        let aligned = align_stop_tick(&reference, &core, 1.0).unwrap();
-        assert!(aligned.first.starts_with("sample 1:"));
+        let (_, aligned, tick) = align_tick(&reference, &core, 1.0).unwrap();
         assert_eq!(
-            Playback::read(&aligned.actual).unwrap().times.len(),
+            Playback::read(&aligned).unwrap().times.len(),
             Playback::read(&reference).unwrap().times.len()
         );
         assert_eq!(
-            Playback::read(&aligned.actual).unwrap().times.last(),
+            Playback::read(&aligned).unwrap().times.last(),
             Playback::read(&core).unwrap().times.last()
         );
-        assert_eq!(aligned.tick, 4.0 * t::SAMPLE_INTERVAL_S);
-        assert!(
-            align_stop_tick(&reference, &shot(true, 5.0 * STEP), 1.0)
-                .err()
-                .unwrap()
-                .starts_with("first difference exceeds rounding")
-        );
-        assert!(align_stop_tick(&reference, &core, 0.5).is_err());
+        assert_eq!(tick, 4.0 * t::SAMPLE_INTERVAL_S);
+        let expected = checkpoints(reference.as_dict().unwrap(), core.as_dict().unwrap());
+        let first = expected
+            .iter()
+            .find(|point| point.first_difference().is_some())
+            .unwrap();
+        assert!(first.rounding_difference().is_none());
+        let wrong = shot(true, 5.0 * STEP);
+        let expected = checkpoints(reference.as_dict().unwrap(), wrong.as_dict().unwrap());
+        let first = expected
+            .iter()
+            .find(|point| point.first_difference().is_some())
+            .unwrap();
+        assert!(first.rounding_difference().is_some());
+        assert!(align_tick(&reference, &core, 0.5).is_err());
+    }
+
+    #[test]
+    fn a_free_flight_failure_stays_free_flight_before_a_later_stop() {
+        let reference = shot(false, 0.0);
+        let core = shot(true, 0.1);
+        let limits =
+            crate::tolerance::Layer::for_fixture(std::path::Path::new(""), "physics/strokes")
+                .unwrap();
+        let proof = evidence(&reference, &core, &core, &limits, Some(Ok(())), 1.0).unwrap();
+        assert!(proof.over_bound.starts_with("positions[1]"));
+        assert_eq!(proof.threshold, None);
     }
 }

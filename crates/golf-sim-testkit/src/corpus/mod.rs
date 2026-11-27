@@ -114,6 +114,7 @@ pub struct FixtureRun {
     scratch: Option<generated::WithDepartures>,
     stroke_models: physics::models::Versions,
     precision_departures: Vec<PrecisionDepartureRule>,
+    stroke_limits: Option<tolerance::Layer>,
     tunable_departures: Option<physics::values::TunableDepartures>,
 }
 
@@ -158,16 +159,21 @@ impl FixtureRun {
             })
             .transpose()?;
         let stroke_models = physics::models::Versions::for_fixture(&header);
-        let precision_departures =
-            if matches!(runner, Runner::PhysicsStrokes | Runner::PhysicsFacade) {
-                Departures::load(&testdata)?
-                    .precision_departure
-                    .into_iter()
-                    .filter(|rule| rule.fixture == key)
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        let stroke_limits = matches!(
+            runner,
+            Runner::PhysicsStrokes | Runner::PhysicsFacade | Runner::StrokeFacade
+        )
+        .then(|| tolerance::Layer::for_fixture(&testdata, key))
+        .transpose()?;
+        let precision_departures = if stroke_limits.is_some() {
+            Departures::load(&testdata)?
+                .precision_departure
+                .into_iter()
+                .filter(|rule| rule.fixture == key)
+                .collect()
+        } else {
+            Vec::new()
+        };
         Ok(Self {
             runner,
             layer: fixture_layer.to_owned(),
@@ -182,6 +188,7 @@ impl FixtureRun {
             tunable_departures,
             stroke_models,
             precision_departures,
+            stroke_limits,
         })
     }
 
@@ -378,7 +385,7 @@ impl FixtureRun {
         let shared_ground = prepared.and_then(|prepared| prepared.ground.as_ref());
 
         if let Some(rule) = self.precision_rule(case) {
-            return self.run_stop_tick(case, course, rule);
+            return self.run_precision(case, course, rule, drift);
         }
 
         Ok(match self.runner {
@@ -407,24 +414,11 @@ impl FixtureRun {
             Runner::PhysicsFlight => physics::flight::replay(case)?,
             Runner::PhysicsContact => physics::contact::run(case, drift)?,
             Runner::PhysicsImpact => physics::impact::compare(case, course, drift)?,
-            Runner::PhysicsFacade => {
-                return Ok(self
-                    .stroke_models
-                    .run(|probe| physics::facade(case, course, probe, drift))?);
-            }
-            Runner::PhysicsStrokes => {
-                return Ok(physics::strokes(case, course, self.stroke_models, drift)?);
+            Runner::PhysicsFacade | Runner::PhysicsStrokes | Runner::StrokeFacade => {
+                return self.stroke_outcome(case, course, drift);
             }
             Runner::WorldConstant => world::replay(case, course, shared_ground, drift)?,
             Runner::StrokeDelivery => stroke::delivery::run(case),
-            Runner::StrokeFacade => {
-                return Ok(stroke::facade_with_model(
-                    case,
-                    course,
-                    drift,
-                    self.stroke_models,
-                )?);
-            }
             Runner::SwingStreams => swing::run(case),
             Runner::RulesTransitions => rules::run(case, drift)?,
             Runner::MathPrims
@@ -442,49 +436,95 @@ impl FixtureRun {
 
     fn precision_rule(&self, case: &Dict) -> Option<&PrecisionDepartureRule> {
         let call = case.get("call").and_then(Variant::as_str)?;
-        if !matches!(call, "shot_integrator.run" | "golf_sim.simulate_launch")
-            || self.precision_departures.is_empty()
+        if !matches!(
+            call,
+            "shot_integrator.run"
+                | "golf_sim.simulate_launch"
+                | "golf_sim.simulate_shot"
+                | "stroke.play"
+        ) || self.precision_departures.is_empty()
         {
             return None;
         }
         let digest = sha256_hex(case.get("id").and_then(Variant::as_str)?.as_bytes());
         self.precision_departures
             .iter()
-            .find(|rule| rule.call == call && rule.id_sha256 == digest)
+            .find(|rule| rule.call == call && rule.ids_sha256.contains(&digest))
     }
 
-    fn run_stop_tick(
+    fn stroke_outcome(
+        &self,
+        case: &Dict,
+        course: Option<&Course>,
+        drift: bool,
+    ) -> Result<CaseOutcome> {
+        Ok(match self.runner {
+            Runner::PhysicsStrokes => physics::strokes(case, course, self.stroke_models, drift)?,
+            Runner::PhysicsFacade => self
+                .stroke_models
+                .run(|probe| physics::facade(case, course, probe, drift))?,
+            Runner::StrokeFacade => {
+                stroke::facade_with_model(case, course, drift, self.stroke_models)?
+            }
+            _ => unreachable!("not a stroke runner"),
+        })
+    }
+
+    fn run_precision(
         &self,
         case: &Dict,
         course: Option<&Course>,
         rule: &PrecisionDepartureRule,
+        drift: bool,
     ) -> Result<CaseOutcome> {
-        let (outcome, step_scale) = if self.runner == Runner::PhysicsStrokes {
-            let scale = match child(case, "input").and_then(|input| input.get("step_scale")) {
-                Some(Variant::Float(value)) => value.value(),
-                Some(Variant::Int(value)) => value.value() as f64,
-                _ => return Err("missing integrator step scale".into()),
-            };
-            (
-                physics::strokes(case, course, self.stroke_models, true)?,
-                scale,
-            )
-        } else {
-            (
-                self.stroke_models
-                    .run(|probe| physics::facade(case, course, probe, true))?,
-                1.0,
-            )
-        };
-        let CaseOutcome::Compared { actual, .. } = outcome else {
+        let raw = self.stroke_outcome(case, course, true)?;
+        let compared = self.stroke_outcome(case, course, false);
+        let CaseOutcome::Compared { actual: raw, .. } = raw else {
             return Err(
                 "precision departure requires a stroke without a changed model response".into(),
             );
         };
-        Ok(CaseOutcome::StopTickDeparture {
-            actual,
+        let delivered = match rule.call.as_str() {
+            "golf_sim.simulate_shot" => Some(physics::verify_delivery(case, &raw, course)),
+            "stroke.play" => Some(stroke::verify_delivery(case, &raw, course)),
+            _ => None,
+        };
+        let step_scale = if self.runner == Runner::PhysicsStrokes {
+            match child(case, "input").and_then(|input| input.get("step_scale")) {
+                Some(Variant::Float(value)) => value.value(),
+                Some(Variant::Int(value)) => value.value() as f64,
+                _ => return Err("missing integrator step scale".into()),
+            }
+        } else {
+            1.0
+        };
+        let CaseOutcome::Compared { actual, .. } = compared? else {
+            return Err(
+                "precision departure requires a stroke without a changed model response".into(),
+            );
+        };
+        let expected = case.get("output").ok_or("missing stroke output")?;
+        let evidence = physics::playback::evidence(
+            expected,
+            &raw,
+            &actual,
+            self.stroke_limits.as_ref().unwrap(),
+            delivered,
             step_scale,
-            change: rule.change.clone(),
+        )?;
+        evidence.rounding?;
+        if evidence.threshold != Some(rule.threshold.as_str()) {
+            return Err(format!(
+                "expected {} at the first over-bound checkpoint, found {:?} at {}; first difference {}",
+                rule.threshold, evidence.threshold, evidence.over_bound, evidence.first,
+            ).into());
+        }
+        Ok(CaseOutcome::PrecisionDeparture {
+            actual: if drift { raw } else { actual },
+            change: format!(
+                "float rounding at {}; first difference {}; first over-bound {}",
+                rule.threshold, evidence.first, evidence.over_bound
+            ),
         })
     }
 

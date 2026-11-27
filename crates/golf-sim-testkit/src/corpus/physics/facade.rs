@@ -853,6 +853,25 @@ fn compare_trajectory(
     output
 }
 
+pub(in crate::corpus) fn verify_delivery(
+    case: &Dict,
+    actual: &Variant,
+    course: Option<&Course>,
+) -> Result<(), String> {
+    let input = dict(field(case, "input"));
+    let request = request(dict(field(input, "request")));
+    let ground = ground(dict(field(input, "ground")), course);
+    let launch = |output: &Variant| -> Result<(), String> {
+        super::impact::verify_strike_rounding(
+            dict(field(dict(field(case, "output")), "launch")),
+            dict(field(dict(output), "launch")),
+            &request,
+            &*ground,
+        )
+    };
+    launch(actual)
+}
+
 pub(in crate::corpus) fn replay(
     case: &Dict,
     course: Option<&Course>,
