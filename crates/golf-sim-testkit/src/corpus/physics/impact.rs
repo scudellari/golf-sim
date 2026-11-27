@@ -259,21 +259,24 @@ fn with_ground<T>(
             }
             run(&plane)
         }
-        "course_ground" if let Some(reads) = input.get("ground_reads") => {
-            let ground = GroundReads {
-                reads: array(reads),
-                index: Cell::new(0),
-            };
-            let output = run(&ground);
-            assert_eq!(ground.index.get(), ground.reads.len());
-            output
+        "course_ground" => {
+            if let Some(reads) = input.get("ground_reads") {
+                let ground = GroundReads {
+                    reads: array(reads),
+                    index: Cell::new(0),
+                };
+                let output = run(&ground);
+                assert_eq!(ground.index.get(), ground.reads.len());
+                output
+            } else {
+                run(&CourseGround::new(
+                    course.ok_or("course ground has neither a course identity nor ground reads")?,
+                    number(ground, "firmness"),
+                    number(ground, "moisture"),
+                    number(ground, "green_speed_m"),
+                ))
+            }
         }
-        "course_ground" => run(&CourseGround::new(
-            course.ok_or("course ground has neither a course identity nor ground reads")?,
-            number(ground, "firmness"),
-            number(ground, "moisture"),
-            number(ground, "green_speed_m"),
-        )),
         "test_sampler" if is_divot_ground(ground) => {
             let params = dict(field(ground, "parameters"));
             run(&read_fields!(params, DivotGround, depth, back))
