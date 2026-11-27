@@ -385,7 +385,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
 | [C01](https://github.com/scudellari/golf-sim/issues/1) | Workspace skeleton, shared types, determinism lints and offline builds | Shared base | codex | nothing | ~500 |
-| [C53](https://github.com/scudellari/golf-sim/issues/52) | The validation suite: measured targets, the licence ledger, the residual report and the scorecard | Shared base | codex | C48, reference data from the consuming game | ~420 |
+| [C53](https://github.com/scudellari/golf-sim/issues/79) | The validation suite: measured targets, the licence ledger, the residual report and the scorecard | Shared base | codex | C48, reference data from the consuming game | ~420 |
 | [C02](https://github.com/scudellari/golf-sim/issues/2) | Maths: `fm`, engine-order vectors and the engine's built-ins | Maths and determinism | codex | C01, reference data from the consuming game, C05 | ~550 |
 | [C03](https://github.com/scudellari/golf-sim/issues/3) | Plane geometry: point in polygon, nearest point, segment crossing, cell-run union | Maths and determinism | codex | C01, reference data from the consuming game, C05 | ~300 |
 | [C04](https://github.com/scudellari/golf-sim/issues/4) | Seeds: `Seed::derive` and `SeedStream` | Maths and determinism | codex | C01, reference data from the consuming game, C05, C02 | ~180 |
@@ -409,11 +409,11 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C08](https://github.com/scudellari/golf-sim/issues/9) | Course data: typed parse and grids | Course | codex | C05, reference data from the consuming game, C48, C64 | ~550 |
 | [C10](https://github.com/scudellari/golf-sim/issues/10) | Physics values, sampler traits, the plane ground and constant air | Physics solver | codex | C02, C03, reference data from the consuming game, C48, C56, C57, C64 | ~550 |
 | [C09](https://github.com/scudellari/golf-sim/issues/11) | Course obstacles, zone map, legal map and the stance footprint | Course | codex | C08, C03, C10 | ~550 |
-| [C11](https://github.com/scudellari/golf-sim/issues/12) | Flight: atmosphere, aerodynamics and the flight step | Physics solver | codex | C10, C53 | ~300 |
+| [C11](https://github.com/scudellari/golf-sim/issues/77) | Flight: atmosphere, aerodynamics and the flight step | Physics solver | codex | C10, C53 | ~300 |
 | [C12](https://github.com/scudellari/golf-sim/issues/13) | Ground contact: bounce, roll, the cup and solid sweep | Physics solver | codex | C10, C53 | ~400 |
 | [C13](https://github.com/scudellari/golf-sim/issues/14) | The stroke integrator | Physics solver | codex | C11, C12 | ~800 |
 | [C14](https://github.com/scudellari/golf-sim/issues/15) | Club impact and strike contact | Physics solver | codex | C10, C53 | ~550 |
-| [C15](https://github.com/scudellari/golf-sim/issues/16) | The physics facade | Physics solver | codex | C13, C14 | ~300 |
+| [C15](https://github.com/scudellari/golf-sim/issues/78) | The physics facade | Physics solver | codex | C13, C14 | ~300 |
 | [C16](https://github.com/scudellari/golf-sim/issues/17) | The world on a constant day | World and stroke | codex | C09, C15, reference data from the consuming game | ~550 |
 | [C17](https://github.com/scudellari/golf-sim/issues/18) | Stroke setup: address, bag, tuning and delivery | World and stroke | codex | C16 | ~600 |
 | [C18](https://github.com/scudellari/golf-sim/issues/19) | The stroke facade, `golf stroke` and `golf course check` | World and stroke | codex | C17 | ~500 |
@@ -422,13 +422,14 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C65](https://github.com/scudellari/golf-sim/issues/64) | The flagstick's rim response | Physics solver | codex | C12, C54, C58, C70 | ~250 |
 | [C66](https://github.com/scudellari/golf-sim/issues/65) | Cup capture on slopes | Physics solver | codex | C12, C54, C65 | ~200 |
 | [C67](https://github.com/scudellari/golf-sim/issues/66) | Green bounce across the iron range | Physics solver | codex | C12, C54, C66 | ~350 |
-| [C68](https://github.com/scudellari/golf-sim/issues/67) | Lift capped near spin ratio 0.3, then a refit | Physics solver | codex | C11, C54, C67 | ~300 |
+| [C68](https://github.com/scudellari/golf-sim/issues/80) | Lift capped near spin ratio 0.3, then a refit | Physics solver | codex | C11, C54, C67 | ~300 |
 | [C71](https://github.com/scudellari/golf-sim/issues/73) | `golf corpus` runners for the phase 1 layers | Tools | codex | C18, C54, C68 | ~600 |
 
 ### Phase 2. A hole on a constant day
 
 | Unit | Title | Track | Label | Depends on | Size |
 | --- | --- | --- | --- | --- | ---: |
+| [C74](https://github.com/scudellari/golf-sim/issues/76) | Real-course findings of the phase 1 close | Tools | codex | C71, C72 | ~450 |
 | [C19](https://github.com/scudellari/golf-sim/issues/20) | The swing meter's judgment | Swing and rules | codex | C02, C04, reference data from the consuming game, C48, C64 | ~350 |
 | [C20](https://github.com/scudellari/golf-sim/issues/21) | Swings: an exact swing and seeded skill profiles | Swing and rules | codex | C19, C17 | ~300 |
 | [C21](https://github.com/scudellari/golf-sim/issues/22) | Rules: rulings, prompts and the provisional ball | Swing and rules | codex | C18, C09, reference data from the consuming game | ~450 |
