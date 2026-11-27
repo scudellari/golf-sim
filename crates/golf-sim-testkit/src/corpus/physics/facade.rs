@@ -615,9 +615,18 @@ impl GroundSampler for PracticeGround {
     }
 }
 
+struct MownGround<'a>(Box<dyn GroundSampler + 'a>);
+
+impl GroundSampler for MownGround<'_> {
+    fn sample_ground(&self, x: Real, z: Real) -> GroundSample {
+        golf_sim_stroke::wrappers::MownGround(self.0.as_ref()).sample_ground(x, z)
+    }
+}
+
 fn ground<'a>(input: &Dict, course: Option<&'a Course>) -> Box<dyn GroundSampler + 'a> {
     match field(input, "kind").as_str().unwrap() {
         "plane" => Box::new(plane(input)),
+        "mown_ground" => Box::new(MownGround(ground(dict(field(input, "ground")), course))),
         "practice_ground" => Box::new(PracticeGround {
             plane: plane(dict(field(input, "plane"))),
             centre: vec3(field(input, "pad_centre")),

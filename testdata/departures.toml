@@ -152,7 +152,32 @@ id = "lab/test-course/120/sweep h3 trip 3 putt 4.5/000008"
 layer = "physics"
 change = "physics 0.9.0: flagstick rim response"
 
-[[departure]]
-id = "values/000000"
-layer = "physics"
+# Apply these only to physics values recorded before the named model change.
+[[field_departure]]
+call = "tunables.constants"
+fields = ["VERSION", "FLAGSTICK_RESTITUTION", "FLAGSTICK_STIFF_RESTITUTION", "FLAGSTICK_TANGENTIAL_FRICTION"]
+version = "0.9.0"
+change = "physics 0.9.0: flagstick rim response"
+
+[[field_departure]]
+call = "tunables.constants"
+fields = ["VERSION", "CUP_CAPTURE_MAX_SLOPE_RAD"]
+version = "0.10.0"
+change = "physics 0.10.0: cup capture on slopes"
+
+[[field_departure]]
+call = "tunables.constants"
+fields = [
+    "VERSION",
+    "GREEN_IRON_TILT_DEG", "GREEN_IRON_TILT_ANGLE", "GREEN_IRON_TILT_SPEED", "GREEN_IRON_TILT_FIRMNESS",
+    "GREEN_IRON_COR", "GREEN_IRON_COR_ANGLE", "GREEN_IRON_COR_ANGLE_SQUARED", "GREEN_IRON_COR_FIRMNESS",
+    "GREEN_IRON_FRICTION", "GREEN_IRON_FRICTION_ANGLE", "GREEN_IRON_FRICTION_FIRMNESS", "GREEN_IRON_FRICTION_SPEED_SQUARED",
+]
+version = "0.11.0"
+change = "physics 0.11.0: green bounce across the iron range"
+
+[[field_departure]]
+call = "tunables.VERSION"
+fields = ["$"]
+version = "0.11.0"
 change = "physics 0.11.0: green bounce across the iron range"

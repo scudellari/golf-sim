@@ -41,15 +41,16 @@ fn values_match_physics_fixture() {
                 let count = dict(expected).entries().len();
                 assert_eq!(count, 159);
                 println!(
-                    "{count} tunables match the GDScript exactly at model {}",
+                    "checking {count} recorded tunables against model {}",
                     t::VERSION
                 );
             }
             _ => {}
         })
         .unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(report.checked + report.skipped.len(), case_count);
-    assert_eq!(report.skipped.len(), 1);
+    assert_eq!(report.checked, case_count);
+    assert!(report.skipped.is_empty());
+    assert_eq!(report.field_departures.len(), 17);
     print!("{report}");
     println!(
         "{ground_cases} plane heights and samples and {playback_cases} position_at cases passed the physics tolerance"

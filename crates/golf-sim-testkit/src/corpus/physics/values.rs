@@ -11,6 +11,137 @@ use golf_sim_physics::{
     },
 };
 
+use crate::tolerance::{CaseOutcome, FieldDeparture, FieldDepartureRule};
+
+pub(super) type Version = (u32, u32, u32);
+
+pub(super) fn version(text: &str) -> Option<Version> {
+    let (major, rest) = text.split_once('.')?;
+    let (minor, patch) = rest.split_once('.')?;
+    Some((
+        major.parse().ok()?,
+        minor.parse().ok()?,
+        patch.parse().ok()?,
+    ))
+}
+
+pub(super) fn recorded_tunables(header: &Dict) -> Option<&str> {
+    super::super::child(header, "oracle")
+        .and_then(|oracle| super::super::child(oracle, "versions"))
+        .and_then(|versions| versions.get("tunables.VERSION"))
+        .and_then(Variant::as_str)
+}
+
+pub(in crate::corpus) struct TunableDepartures {
+    recorded: Option<String>,
+    rules: Vec<FieldDepartureRule>,
+}
+
+impl TunableDepartures {
+    pub(in crate::corpus) fn new(
+        header: &Dict,
+        rules: Vec<FieldDepartureRule>,
+    ) -> super::super::Result<Self> {
+        let recorded = recorded_tunables(header);
+        let recorded_version = recorded.and_then(version);
+        let current = version(t::VERSION).expect("physics model version");
+        let mut applicable = Vec::new();
+        for rule in rules {
+            let cutoff = version(&rule.version).ok_or_else(|| {
+                format!(
+                    "invalid physics version {:?} in field departure",
+                    rule.version
+                )
+            })?;
+            if recorded_version.is_some_and(|recorded| recorded < cutoff && cutoff <= current) {
+                applicable.push(rule);
+            }
+        }
+        Ok(Self {
+            recorded: recorded.map(str::to_owned),
+            rules: applicable,
+        })
+    }
+
+    pub(in crate::corpus) fn run(
+        &self,
+        case: &Dict,
+        drift: bool,
+    ) -> super::super::Result<CaseOutcome> {
+        let mut actual = run_case(case)?;
+        let call = field(case, "call").as_str().unwrap();
+        let expected = field(case, "output");
+        let mut departures = Vec::new();
+        match call {
+            "tunables.constants" => {
+                let mut actual_fields = Vec::new();
+                for (key, value) in dict(&actual).entries() {
+                    let name = key.as_str().expect("named tunable");
+                    let compared = match dict(expected).get(name) {
+                        Some(recorded)
+                            if golf_sim_base::corpus::first_difference(recorded, value)
+                                .is_none() =>
+                        {
+                            Some(value)
+                        }
+                        recorded => {
+                            let explained = if name == "VERSION" {
+                                recorded.and_then(Variant::as_str) == self.recorded.as_deref()
+                            } else {
+                                recorded.is_none()
+                            };
+                            if let Some(rule) = self.rule(call, name).filter(|_| explained) {
+                                departures.push(self.note(case, name, rule));
+                                recorded
+                            } else {
+                                Some(value)
+                            }
+                        }
+                    };
+                    if let Some(compared) = compared {
+                        actual_fields.push((key.clone(), compared.clone()));
+                    }
+                }
+                if !drift {
+                    actual = Variant::Dict(Dict::new(actual_fields));
+                    if let Some(field) = golf_sim_base::corpus::first_difference(expected, &actual)
+                    {
+                        return Err(format!("tunables.constants differs at {field}").into());
+                    }
+                }
+            }
+            "tunables.VERSION"
+                if expected.as_str() == self.recorded.as_deref()
+                    && expected.as_str() != Some(t::VERSION) =>
+            {
+                if let Some(rule) = self.rule(call, "$") {
+                    departures.push(self.note(case, "$", rule));
+                    if !drift {
+                        actual = expected.clone();
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(CaseOutcome::Compared { actual, departures })
+    }
+
+    fn rule(&self, call: &str, field: &str) -> Option<&FieldDepartureRule> {
+        self.rules
+            .iter()
+            .rev()
+            .find(|rule| rule.call == call && rule.fields.iter().any(|name| name == field))
+    }
+
+    fn note(&self, case: &Dict, field_name: &str, rule: &FieldDepartureRule) -> FieldDeparture {
+        FieldDeparture {
+            id: field(case, "id").as_str().unwrap().into(),
+            field: field_name.into(),
+            change: rule.change.clone(),
+        }
+    }
+}
+
 fn dict(value: &Variant) -> &Dict {
     value.as_dict().expect("expected dictionary")
 }
@@ -527,6 +658,18 @@ fn tunable_snapshot() -> Variant {
         BOUNCE_GREEN_TANGENTIAL_COR: t::BOUNCE_GREEN_TANGENTIAL_COR,
         BOUNCE_GREEN_CRATER_SCALE: t::BOUNCE_GREEN_CRATER_SCALE,
         BOUNCE_GREEN_CAP_SOFTNESS: t::BOUNCE_GREEN_CAP_SOFTNESS,
+        GREEN_IRON_TILT_DEG: t::GREEN_IRON_TILT_DEG,
+        GREEN_IRON_TILT_ANGLE: t::GREEN_IRON_TILT_ANGLE,
+        GREEN_IRON_TILT_SPEED: t::GREEN_IRON_TILT_SPEED,
+        GREEN_IRON_TILT_FIRMNESS: t::GREEN_IRON_TILT_FIRMNESS,
+        GREEN_IRON_COR: t::GREEN_IRON_COR,
+        GREEN_IRON_COR_ANGLE: t::GREEN_IRON_COR_ANGLE,
+        GREEN_IRON_COR_ANGLE_SQUARED: t::GREEN_IRON_COR_ANGLE_SQUARED,
+        GREEN_IRON_COR_FIRMNESS: t::GREEN_IRON_COR_FIRMNESS,
+        GREEN_IRON_FRICTION: t::GREEN_IRON_FRICTION,
+        GREEN_IRON_FRICTION_ANGLE: t::GREEN_IRON_FRICTION_ANGLE,
+        GREEN_IRON_FRICTION_FIRMNESS: t::GREEN_IRON_FRICTION_FIRMNESS,
+        GREEN_IRON_FRICTION_SPEED_SQUARED: t::GREEN_IRON_FRICTION_SPEED_SQUARED,
         BOUNCE_CRATER_SOFT_SCALE: t::BOUNCE_CRATER_SOFT_SCALE,
         BOUNCE_CRATER_FIRM_SCALE: t::BOUNCE_CRATER_FIRM_SCALE,
         BOUNCE_COR_SOFT_SCALE: t::BOUNCE_COR_SOFT_SCALE,
@@ -547,6 +690,7 @@ fn tunable_snapshot() -> Variant {
         CUP_DEPTH_M: t::CUP_DEPTH_M,
         CUP_CAPTURE_SPEED: t::CUP_CAPTURE_SPEED,
         CUP_CAPTURE_EXPONENT: t::CUP_CAPTURE_EXPONENT,
+        CUP_CAPTURE_MAX_SLOPE_RAD: t::CUP_CAPTURE_MAX_SLOPE_RAD,
         CUP_LIP_MAX_DEFLECT_RAD: t::CUP_LIP_MAX_DEFLECT_RAD,
         CUP_LIP_SPEED_KEEP: t::CUP_LIP_SPEED_KEEP,
         CANOPY_DRAG_PER_M: t::CANOPY_DRAG_PER_M,
@@ -554,6 +698,9 @@ fn tunable_snapshot() -> Variant {
         OBSTACLES: indexed(&t::OBSTACLES, obstacle_output),
         FLAGSTICK_RADIUS_M: t::FLAGSTICK_RADIUS_M,
         FLAGSTICK_HEIGHT_M: t::FLAGSTICK_HEIGHT_M,
+        FLAGSTICK_RESTITUTION: t::FLAGSTICK_RESTITUTION,
+        FLAGSTICK_STIFF_RESTITUTION: t::FLAGSTICK_STIFF_RESTITUTION,
+        FLAGSTICK_TANGENTIAL_FRICTION: t::FLAGSTICK_TANGENTIAL_FRICTION,
         BALL: ball_output(t::BALL),
         _IN: t::_IN,
         _G_CM2: t::_G_CM2,
@@ -562,23 +709,14 @@ fn tunable_snapshot() -> Variant {
     }
 }
 
-pub(in crate::corpus) fn run_case(case: &Dict, drift: bool) -> Result<Variant, String> {
+fn run_case(case: &Dict) -> Result<Variant, String> {
     let call = field(case, "call").as_str().unwrap();
     let input = dict(field(case, "input"));
     let instance = || field(input, "self");
     let real = |key| number(input, key);
     let point = |key| vec3(field(input, key));
     let result = match call {
-        "tunables.constants" => {
-            let snapshot = tunable_snapshot();
-            if !drift
-                && let Some(field) =
-                    golf_sim_base::corpus::first_difference(field(case, "output"), &snapshot)
-            {
-                return Err(format!("tunables.constants differs at {field}"));
-            }
-            snapshot
-        }
+        "tunables.constants" => tunable_snapshot(),
         "tunables.VERSION" => t::VERSION.into(),
         "tunables.standard_ball" => ball_output(t::standard_ball()),
         "tunables.standard_club_ids" => Variant::PackedStringArray(
@@ -651,4 +789,70 @@ pub(in crate::corpus) fn run_case(case: &Dict, drift: bool) -> Result<Variant, S
         _ => return Err(format!("unknown physics values call {call:?}")),
     };
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use golf_sim_base::digest::object;
+
+    #[test]
+    fn historical_field_departures_keep_other_tunables_exact() {
+        let rules = || {
+            vec![FieldDepartureRule {
+                call: "tunables.constants".into(),
+                fields: vec!["VERSION".into(), "FLAGSTICK_RESTITUTION".into()],
+                version: "0.9.0".into(),
+                change: "flagstick rim response".into(),
+            }]
+        };
+        let header = |version: &str| {
+            object([(
+                "oracle",
+                object([("versions", object([("tunables.VERSION", version.into())]))]),
+            )])
+        };
+        let historical = header("0.8.0");
+        let past = TunableDepartures::new(dict(&historical), rules()).unwrap();
+        let snapshot = tunable_snapshot();
+        let mut recorded: Vec<_> = dict(&snapshot)
+            .entries()
+            .iter()
+            .filter(|(key, _)| key.as_str() != Some("FLAGSTICK_RESTITUTION"))
+            .cloned()
+            .collect();
+        *recorded
+            .iter_mut()
+            .find(|(key, _)| key.as_str() == Some("VERSION"))
+            .map(|(_, value)| value)
+            .unwrap() = "0.8.0".into();
+        let case = |entries| {
+            object([
+                ("id", "synthetic".into()),
+                ("call", "tunables.constants".into()),
+                ("input", object([])),
+                ("output", Variant::Dict(Dict::new(entries))),
+            ])
+        };
+        let mut compatible = case(recorded.clone());
+        let CaseOutcome::Compared { departures, .. } = past.run(dict(&compatible), false).unwrap()
+        else {
+            panic!("expected an older snapshot with field departures");
+        };
+        assert_eq!(departures.len(), 2);
+
+        let latest = header(t::VERSION);
+        let current = TunableDepartures::new(dict(&latest), rules()).unwrap();
+        assert!(current.run(dict(&compatible), false).is_err());
+
+        *recorded
+            .iter_mut()
+            .find(|(key, _)| key.as_str() == Some("GRAVITY"))
+            .map(|(_, value)| value)
+            .unwrap() = 50.0.into();
+        compatible = case(recorded);
+        assert!(
+            matches!(past.run(dict(&compatible), false), Err(error) if error.to_string().contains("GRAVITY"))
+        );
+    }
 }

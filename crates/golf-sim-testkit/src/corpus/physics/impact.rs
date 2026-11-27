@@ -214,6 +214,25 @@ impl GroundSampler for GroundReads<'_> {
     }
 }
 
+pub(in crate::corpus) fn unsupported_ground(input: &Dict) -> Option<String> {
+    let ground = input.get("ground")?.as_dict()?;
+    let kind = ground.get("kind")?.as_str()?;
+    match kind {
+        "plane" => None,
+        "course_ground" if input.get("ground_reads").is_some() => None,
+        "test_sampler" if is_divot_ground(ground) => None,
+        _ => Some(format!("unsupported ground sampler {kind:?}")),
+    }
+}
+
+fn is_divot_ground(ground: &Dict) -> bool {
+    ground
+        .get("script")
+        .and_then(Variant::as_str)
+        .and_then(|script| script.rsplit("::").next())
+        == Some("DivotGround")
+}
+
 fn with_ground<T>(input: &Dict, run: impl FnOnce(&dyn GroundSampler) -> T) -> T {
     let ground = dict(field(input, "ground"));
     match field(ground, "kind").as_str().unwrap() {

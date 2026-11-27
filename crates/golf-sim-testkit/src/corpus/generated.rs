@@ -6,7 +6,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use super::{Result, Runner, child};
+use super::{Result, Runner, child, unwrapped_ground};
 
 pub(super) struct WithDepartures(PathBuf);
 
@@ -27,6 +27,7 @@ impl WithDepartures {
                 ["conditions", "ground"]
                     .into_iter()
                     .filter_map(|name| child(input, name))
+                    .map(unwrapped_ground)
                     .any(|sampler| {
                         matches!(
                             sampler.get("kind").and_then(Variant::as_str),

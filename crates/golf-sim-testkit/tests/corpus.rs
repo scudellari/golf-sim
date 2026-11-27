@@ -660,31 +660,60 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
         }));
     }
 
-    let Some(Variant::Dict(oracle)) = header.get_mut("oracle") else {
-        panic!("expected oracle header");
-    };
-    let Some(Variant::Dict(course)) = oracle.get_mut("course") else {
-        panic!("expected course identity");
-    };
-    *course.get_mut("revision").unwrap() = "missing-revision".into();
-    write_fixture(&path, &Variant::Dict(header));
-    for action in ["check", "drift"] {
-        let output = Command::new(golf)
-            .env("GOLF_SIM_LOCAL_DATA", "")
-            .current_dir(&work.0)
-            .args(["corpus", action])
-            .arg(&path)
-            .arg("--course-dir")
-            .arg(&parent)
-            .output()
+    for (id, corrupt_sibling) in [
+        ("test-course", false),
+        ("unknown-course", false),
+        ("test-course", true),
+    ] {
+        if corrupt_sibling {
+            let sibling = parent.join("corrupt-revision");
+            fs::create_dir(&sibling).unwrap();
+            fs::write(
+                sibling.join("manifest.json"),
+                br#"{"course_id":"test-course","course_revision":"missing-revision","#,
+            )
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        let error = text(&output.stderr);
-        assert!(
-            error.contains("course \"test-course\" revision \"missing-revision\" was not found"),
-            "{error}"
-        );
-        print!("{action}: {error}");
+        }
+        let Some(Variant::Dict(oracle)) = header.get_mut("oracle") else {
+            panic!("expected oracle header");
+        };
+        let Some(Variant::Dict(course)) = oracle.get_mut("course") else {
+            panic!("expected course identity");
+        };
+        *course.get_mut("id").unwrap() = id.into();
+        *course.get_mut("revision").unwrap() = "missing-revision".into();
+        write_fixture(&path, &Variant::Dict(header.clone()));
+        for action in ["check", "drift"] {
+            let output = Command::new(golf)
+                .env("GOLF_SIM_LOCAL_DATA", "")
+                .current_dir(&work.0)
+                .args(["corpus", action])
+                .arg(&path)
+                .arg("--course-dir")
+                .arg(&parent)
+                .output()
+                .unwrap();
+            if id == "test-course" && !corrupt_sibling {
+                assert!(output.status.success(), "{}", text(&output.stderr));
+                let report = text(&output.stdout);
+                assert!(report.contains("modified copy of test-course"));
+                assert!(report.contains("revision \"missing-revision\": 1 cases"));
+            } else {
+                assert_eq!(output.status.code(), Some(1));
+                let error = text(&output.stderr);
+                let reason = if corrupt_sibling {
+                    "course inventory could not be read"
+                } else {
+                    "course \"unknown-course\" revision \"missing-revision\" was not found"
+                };
+                assert!(error.contains(reason), "{error}");
+                if corrupt_sibling {
+                    assert!(error.contains("corrupt-revision"), "{error}");
+                    assert!(!error.contains("modified copy"), "{error}");
+                }
+                assert!(error.contains("refusals exceed 1%"));
+            }
+        }
     }
 }
 

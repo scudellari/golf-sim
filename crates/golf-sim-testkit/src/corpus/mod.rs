@@ -24,7 +24,7 @@ use golf_sim_base::{
 
 use golf_sim_course::course::Course;
 
-use crate::tolerance::{self, CheckReport, DriftReport, Fixture};
+use crate::tolerance::{self, CaseOutcome, CheckReport, Departures, DriftReport, Fixture};
 
 use self::courses::Courses;
 
@@ -108,6 +108,7 @@ pub struct FixtureRun {
     header: Dict,
     query_checks: course::QueryChecks,
     scratch: Option<generated::WithDepartures>,
+    tunable_departures: Option<physics::values::TunableDepartures>,
 }
 
 impl FixtureRun {
@@ -131,26 +132,37 @@ impl FixtureRun {
         }
         let testdata = testdata_for(path);
         let mut roots = course_dirs.to_vec();
-        roots.push(testdata.join("courses"));
-        let local_courses = PathBuf::from("testdata/courses");
-        if !roots.contains(&local_courses) {
-            roots.push(local_courses);
+        if roots.is_empty() {
+            roots.push(testdata.join("courses"));
+            let local_courses = PathBuf::from("testdata/courses");
+            if !roots.contains(&local_courses) {
+                roots.push(local_courses);
+            }
         }
         let header_course = child(&header, "oracle")
             .and_then(|oracle| child(oracle, "course"))
             .cloned();
         let scratch = generated::WithDepartures::prepare(&testdata, runner, &header)?;
+        let tunable_departures = (runner == Runner::PhysicsValues)
+            .then(|| {
+                physics::values::TunableDepartures::new(
+                    &header,
+                    Departures::load(&testdata)?.field_departure,
+                )
+            })
+            .transpose()?;
         Ok(Self {
             runner,
             layer: fixture_layer.to_owned(),
             key: key.to_owned(),
             path: path.to_owned(),
             header_course,
-            courses: Courses::new(roots),
+            courses: Courses::new(roots, course_dirs),
             testdata,
             header,
             query_checks: course::QueryChecks::default(),
             scratch,
+            tunable_departures,
         })
     }
 
@@ -165,6 +177,12 @@ impl FixtureRun {
 
     pub fn check_observing(mut self, mut observe: impl FnMut(&Dict)) -> Result<CheckReport> {
         let header = std::mem::take(&mut self.header);
+        if self.runner == Runner::Variant {
+            return self.comparison(header).check(&self.layer, |case| {
+                observe(case);
+                tolerance::variant_snapshot(case)
+            });
+        }
         if self.runner.projects() {
             let mut projected = self.project(&header, false)?;
             return projected.fixture().check(&self.layer, |case| {
@@ -174,7 +192,7 @@ impl FixtureRun {
         }
         let fixture = self.comparison(header);
         let layer = self.layer.clone();
-        let report = fixture.check(&layer, |case| {
+        let report = fixture.check_cases(&layer, |case| {
             observe(case);
             self.run(case, false)
         });
@@ -198,7 +216,7 @@ impl FixtureRun {
         }
         let fixture = self.comparison(header);
         let layer = self.layer.clone();
-        let report = fixture.drift(&layer, |case| self.run(case, true));
+        let report = fixture.drift_cases(&layer, |case| self.run(case, true));
         if self.runner == Runner::CourseQueries {
             let _ = self.query_checks.finish();
         }
@@ -273,27 +291,41 @@ impl FixtureRun {
     }
 
     fn resolve_course(&mut self, case: &Dict) -> Result<Option<Arc<Course>>> {
-        let input = child(case, "input");
-        let world = input.and_then(|input| child(input, "world"));
-        let ground = world.or(input).and_then(|args| child(args, "ground"));
-        let identity = ground
-            .and_then(|ground| child(ground, "course"))
-            .or_else(|| world.and_then(|world| child(world, "course")))
-            .or_else(|| {
-                input
-                    .and_then(|input| child(input, "terrain"))
-                    .and_then(|terrain| child(terrain, "course"))
-            })
-            .or_else(|| input.and_then(|input| child(input, "course")))
-            .or_else(|| child(case, "course"));
-        Ok(identity
-            .or(self.header_course.as_ref())
-            .map(|identity| self.courses.open(identity))
-            .transpose()?)
+        let Some(identity) = course_identity(case).or(self.header_course.as_ref()) else {
+            return Ok(None);
+        };
+        self.courses
+            .open(identity)?
+            .map(Some)
+            .ok_or_else(|| missing_course(identity).into())
     }
 
-    fn run(&mut self, case: &Dict, drift: bool) -> Result<Variant> {
-        let resolved = self.resolve_course(case)?;
+    fn run(&mut self, case: &Dict, drift: bool) -> Result<CaseOutcome> {
+        if let Some(reason) = self.unsupported_sampler(case) {
+            return Ok(CaseOutcome::Refused(reason));
+        }
+        let resolved = if let Some(identity) = course_identity(case).or(self.header_course.as_ref())
+        {
+            let course = match self.courses.open(identity) {
+                Ok(Some(course)) => course,
+                Err(reason) => return Ok(CaseOutcome::Refused(reason)),
+                Ok(None) => {
+                    let id = identity.get("id").and_then(Variant::as_str).unwrap();
+                    let revision = identity.get("revision").and_then(Variant::as_str).unwrap();
+                    return Ok(if self.courses.is_modified_copy(id, revision) {
+                        CaseOutcome::ModifiedCourse {
+                            course: id.to_owned(),
+                            revision: revision.to_owned(),
+                        }
+                    } else {
+                        CaseOutcome::Refused(missing_course(identity))
+                    });
+                }
+            };
+            Some(course)
+        } else {
+            None
+        };
         let course = resolved.as_deref();
 
         Ok(match self.runner {
@@ -307,7 +339,13 @@ impl FixtureRun {
                 &mut self.query_checks,
                 drift,
             )?,
-            Runner::PhysicsValues => physics::values::run_case(case, drift)?,
+            Runner::PhysicsValues => {
+                return self
+                    .tunable_departures
+                    .as_ref()
+                    .expect("loaded physics values comparison")
+                    .run(case, drift);
+            }
             Runner::PhysicsFlight => physics::flight::replay(case)?,
             Runner::PhysicsContact => physics::contact::run(case, drift)?,
             Runner::PhysicsImpact => physics::impact::compare(case, drift)?,
@@ -327,8 +365,90 @@ impl FixtureRun {
             | Runner::HoleObserve => {
                 unreachable!("runner uses projected output")
             }
-        })
+        }
+        .into())
     }
+
+    fn unsupported_sampler(&self, case: &Dict) -> Option<String> {
+        let input = child(case, "input")?;
+        if self.runner == Runner::PhysicsImpact {
+            return physics::impact::unsupported_ground(input);
+        }
+        let (air, ground, ground_kinds): (_, _, &[_]) = match self.runner {
+            Runner::WorldConstant | Runner::StrokeFacade => {
+                let world = child(input, "world")?;
+                (
+                    child(world, "air"),
+                    child(world, "ground"),
+                    &["course_ground", "practice_ground", "plane"],
+                )
+            }
+            Runner::PhysicsFacade | Runner::PhysicsStrokes => (
+                child(input, "conditions"),
+                child(input, "ground"),
+                &["course_ground", "practice_ground", "plane"],
+            ),
+            _ => return None,
+        };
+        let ground = if matches!(self.runner, Runner::PhysicsFacade | Runner::PhysicsStrokes) {
+            ground.map(unwrapped_ground)
+        } else {
+            ground
+        };
+        for (sampler, name, supported) in [
+            (air, "air", &["constant_air"][..]),
+            (ground, "ground", ground_kinds),
+        ] {
+            if let Some(kind) = sampler
+                .and_then(|sampler| sampler.get("kind"))
+                .and_then(Variant::as_str)
+                && !supported.contains(&kind)
+            {
+                return Some(format!("unsupported {name} sampler {kind:?}"));
+            }
+        }
+        None
+    }
+}
+
+fn missing_course(identity: &Dict) -> String {
+    let field = |key| {
+        identity
+            .get(key)
+            .and_then(Variant::as_str)
+            .unwrap_or_default()
+    };
+    format!(
+        "course {:?} revision {:?} was not found (use --course-dir)",
+        field("id"),
+        field("revision")
+    )
+}
+
+fn unwrapped_ground(mut ground: &Dict) -> &Dict {
+    while ground.get("kind").and_then(Variant::as_str) == Some("mown_ground") {
+        let Some(inner) = child(ground, "ground") else {
+            break;
+        };
+        ground = inner;
+    }
+    ground
+}
+
+fn course_identity(case: &Dict) -> Option<&Dict> {
+    let input = child(case, "input");
+    let world = input.and_then(|input| child(input, "world"));
+    let ground = world.or(input).and_then(|args| child(args, "ground"));
+    ground
+        .and_then(|ground| child(unwrapped_ground(ground), "course"))
+        .or_else(|| world.and_then(|world| child(world, "course")))
+        .or_else(|| {
+            input
+                .and_then(|input| child(input, "terrain"))
+                .and_then(|terrain| child(terrain, "course"))
+        })
+        .or_else(|| input.and_then(|input| child(input, "course")))
+        .or_else(|| child(case, "course"))
 }
 
 fn child<'a>(dict: &'a Dict, name: &str) -> Option<&'a Dict> {

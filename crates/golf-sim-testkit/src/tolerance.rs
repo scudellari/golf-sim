@@ -278,18 +278,27 @@ impl Case<'_> {
         }
     }
 
-    fn run<E: fmt::Display>(
-        &self,
-        run: &mut impl FnMut(&Dict) -> Result<Variant, E>,
-    ) -> CorpusResult<Variant> {
-        Ok(run(self.fields)
-            .map_err(|error| format!("cases[{}] (case {:?}): {error}", self.index, self.id()))?)
+    fn call(&self) -> Option<&str> {
+        self.fields.get("call").and_then(Variant::as_str)
+    }
+
+    fn run_error(&self, error: impl fmt::Display) -> String {
+        if let Some(call) = self.call() {
+            format!(
+                "cases[{}] (case {:?}, call {call:?}): {error}",
+                self.index,
+                self.id()
+            )
+        } else {
+            format!("cases[{}] (case {:?}): {error}", self.index, self.id())
+        }
     }
 
     fn difference(&self, field: &str, delta: Option<Delta>) -> Difference {
         Difference {
             path: self.output_path(field),
             case_id: self.id().into(),
+            call: self.call().map(str::to_owned),
             delta,
         }
     }
@@ -385,12 +394,17 @@ impl fmt::Display for Delta {
 pub struct Difference {
     pub path: String,
     pub case_id: String,
+    pub call: Option<String>,
     pub delta: Option<Delta>,
 }
 
 impl fmt::Display for Difference {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} (case {:?}): ", self.path, self.case_id)?;
+        write!(f, "{} (case {:?}", self.path, self.case_id)?;
+        if let Some(call) = &self.call {
+            write!(f, ", call {call:?}")?;
+        }
+        f.write_str("): ")?;
         match self.delta {
             Some(delta) => write!(f, "{delta}"),
             None => f.write_str("discrete difference"),
@@ -748,8 +762,7 @@ fn compare_case(
     actual: &Variant,
     layer: &Layer,
     allow_discrete: bool,
-    skipped: &[Departure],
-) -> CorpusResult<Option<Difference>> {
+) -> CorpusResult<(Option<Difference>, bool)> {
     let values = OnceCell::new();
     let values = || values.get_or_init(|| OutputFields::new(expected, actual));
     let default = layer.default_bounds();
@@ -777,26 +790,19 @@ fn compare_case(
             .flatten();
         layer.numeric_tolerance(field, bounds, measurement)
     };
-    let failure = |difference| -> Box<dyn StdError> {
-        CheckFailure {
-            difference,
-            skipped: skipped.to_vec(),
-        }
-        .into()
-    };
     let Some(first) = corpus::first_difference_with(expected, actual, tolerance) else {
-        return Ok(None);
+        return Ok((None, false));
     };
     let fields = values();
     if fields.discrete.as_deref() != Some(&first) {
         let delta = measurements()
             .get(first.as_str())
             .map(|&(_, _, delta)| delta);
-        return Err(failure(case.difference(&first, delta)));
+        return Ok((Some(case.difference(&first, delta)), true));
     }
     let difference = case.difference(&first, None);
     if !allow_discrete {
-        return Err(failure(difference));
+        return Ok((Some(difference), true));
     }
     if !matches!(case.layer, "hole" | "round") {
         for (path, expected, actual, delta) in fields.numeric(input_scale) {
@@ -805,11 +811,11 @@ fn compare_case(
             })
             .is_some()
             {
-                return Err(failure(case.difference(path, Some(delta))));
+                return Ok((Some(case.difference(path, Some(delta))), true));
             }
         }
     }
-    Ok(Some(difference))
+    Ok((Some(difference), false))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -830,28 +836,47 @@ impl fmt::Display for Departure {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Departures {
+    #[serde(default)]
+    departure: Vec<Departure>,
+    #[serde(default)]
+    pub field_departure: Vec<FieldDepartureRule>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FieldDepartureRule {
+    pub call: String,
+    pub fields: Vec<String>,
+    pub version: String,
+    pub change: String,
+}
+
+impl Departures {
+    pub(crate) fn load(testdata: &Path) -> CorpusResult<Self> {
+        read_config(
+            &testdata.join(DEPARTURES),
+            include_str!("../departures.toml"),
+        )
+    }
+}
+
 impl Fixture {
     fn selected_cases(&self) -> CorpusResult<(Vec<Case<'_>>, Vec<Departure>)> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Departures {
-            #[serde(default)]
-            departure: Vec<Departure>,
+        let departures = Departures::load(&self.testdata)?;
+        let mut by_case = BTreeMap::new();
+        for departure in &departures.departure {
+            by_case
+                .entry((departure.layer.as_str(), departure.id.as_str()))
+                .or_insert(departure);
         }
-
-        let departures: Departures = read_config(
-            &self.testdata.join(DEPARTURES),
-            include_str!("../departures.toml"),
-        )?;
         let mut selected = Vec::new();
         let mut skipped = Vec::new();
         for case in self.cases() {
-            let departure = departures
-                .departure
-                .iter()
-                .find(|departure| departure.layer == case.layer && departure.id == case.id());
-            match departure {
-                Some(departure) => skipped.push(departure.clone()),
+            match by_case.get(&(case.layer, case.id())) {
+                Some(departure) => skipped.push((*departure).clone()),
                 None => selected.push(case),
             }
         }
@@ -859,11 +884,101 @@ impl Fixture {
     }
 }
 
-#[derive(Debug)]
+pub(crate) enum CaseOutcome {
+    Compared {
+        actual: Variant,
+        departures: Vec<FieldDeparture>,
+    },
+    Refused(String),
+    ModifiedCourse {
+        course: String,
+        revision: String,
+    },
+}
+
+impl From<Variant> for CaseOutcome {
+    fn from(actual: Variant) -> Self {
+        Self::Compared {
+            actual,
+            departures: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CaseRefusal {
+    pub id: String,
+    pub reason: String,
+    modified_course: Option<String>,
+}
+
+impl CaseRefusal {
+    fn other(id: &str, reason: String) -> Self {
+        Self {
+            id: id.into(),
+            reason,
+            modified_course: None,
+        }
+    }
+
+    fn modified(id: &str, course: String, revision: String) -> Self {
+        Self {
+            id: id.into(),
+            reason: format!("modified copy of {course}"),
+            modified_course: Some(revision),
+        }
+    }
+}
+
+fn write_refusals(f: &mut fmt::Formatter<'_>, refused: &[CaseRefusal]) -> fmt::Result {
+    let mut revisions = BTreeMap::new();
+    for refusal in refused {
+        writeln!(f, "{refusal}")?;
+        if let Some(revision) = &refusal.modified_course {
+            *revisions.entry((&refusal.reason, revision)).or_insert(0) += 1;
+        }
+    }
+    for ((reason, revision), count) in revisions {
+        writeln!(f, "{reason}, revision {revision:?}: {count} cases")?;
+    }
+    Ok(())
+}
+
+impl fmt::Display for CaseRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "refused case {:?}: {}", self.id, self.reason)?;
+        if let Some(revision) = &self.modified_course {
+            write!(f, " (revision {revision:?})")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldDeparture {
+    pub id: String,
+    pub field: String,
+    pub change: String,
+}
+
+impl fmt::Display for FieldDeparture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "departed field {:?} (case {:?}; change {})",
+            self.field, self.id, self.change
+        )
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct CheckReport {
     pub checked: usize,
     pub discrete: Vec<Difference>,
     pub skipped: Vec<Departure>,
+    pub refused: Vec<CaseRefusal>,
+    pub field_departures: Vec<FieldDeparture>,
+    failures: Vec<String>,
 }
 
 impl fmt::Display for CheckReport {
@@ -871,30 +986,60 @@ impl fmt::Display for CheckReport {
         for departure in &self.skipped {
             writeln!(f, "{departure}")?;
         }
+        write_refusals(f, &self.refused)?;
+        if !self.refused.is_empty() {
+            writeln!(
+                f,
+                "refused {} of {} cases",
+                self.refused.len(),
+                self.case_count()
+            )?;
+        }
+        for departure in &self.field_departures {
+            writeln!(f, "{departure}")?;
+        }
         for difference in &self.discrete {
             writeln!(f, "{difference} (within discrete allowance)")?;
+        }
+        if !self.failures.is_empty() {
+            for failure in &self.failures {
+                writeln!(f, "{failure}")?;
+            }
+            writeln!(f, "failed {} cases", self.failures.len())?;
         }
         let noun = if self.checked == 1 { "case" } else { "cases" };
         writeln!(f, "checked {} {noun}", self.checked)
     }
 }
 
-#[derive(Debug)]
-struct CheckFailure {
-    difference: Difference,
-    skipped: Vec<Departure>,
+impl CheckReport {
+    fn case_count(&self) -> usize {
+        self.checked + self.refused.len() + self.skipped.len()
+    }
 }
+
+#[derive(Debug)]
+struct CheckFailure(CheckReport);
 
 impl fmt::Display for CheckFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for departure in &self.skipped {
-            writeln!(f, "{departure}")?;
+        write!(f, "{}", self.0)?;
+        if exceeds_refusal_limit(&self.0.refused, self.0.case_count()) {
+            writeln!(f, "refusals exceed 1% of fixture cases")?;
         }
-        write!(f, "{}", self.difference)
+        Ok(())
     }
 }
 
 impl StdError for CheckFailure {}
+
+fn exceeds_refusal_limit(refused: &[CaseRefusal], total: usize) -> bool {
+    let counted = refused
+        .iter()
+        .filter(|entry| entry.modified_course.is_none())
+        .count();
+    counted > total / 100
+}
 
 /// Run a fixture against its configured tolerances and skip intentional departures.
 ///
@@ -915,32 +1060,88 @@ impl Fixture {
         layer: &str,
         mut run: impl FnMut(&Dict) -> Result<Variant, E>,
     ) -> CorpusResult<CheckReport> {
+        self.check_cases(layer, |case| run(case).map(Into::into))
+            .map_err(|error| match error.downcast::<CheckFailure>() {
+                Ok(failure) => {
+                    let report = failure.0;
+                    let mut text = String::new();
+                    use fmt::Write;
+                    for departure in &report.skipped {
+                        writeln!(text, "{departure}").unwrap();
+                    }
+                    text.push_str(&report.failures[0]);
+                    text.into()
+                }
+                Err(error) => error,
+            })
+    }
+
+    pub(crate) fn check_cases<E: fmt::Display>(
+        &self,
+        layer: &str,
+        mut run: impl FnMut(&Dict) -> Result<CaseOutcome, E>,
+    ) -> CorpusResult<CheckReport> {
         self.require_layer(layer)?;
         let config = self.testdata.join(TOLERANCES);
         let limits = Layer::load(&config, self.key(), layer)?
             .ok_or_else(|| format!("{}: no tolerances for layer {layer:?}", config.display()))?;
         let (cases, skipped) = self.selected_cases()?;
-        let checked = cases.len();
+        let mut report = CheckReport {
+            skipped,
+            ..CheckReport::default()
+        };
         let mut discrete = Vec::new();
         for case in cases {
+            let outcome = match run(case.fields) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    report.checked += 1;
+                    report.failures.push(case.run_error(error));
+                    continue;
+                }
+            };
+            let (actual, departures) = match outcome {
+                CaseOutcome::Compared { actual, departures } => (actual, departures),
+                CaseOutcome::Refused(reason) => {
+                    report.refused.push(CaseRefusal::other(case.id(), reason));
+                    continue;
+                }
+                CaseOutcome::ModifiedCourse { course, revision } => {
+                    report
+                        .refused
+                        .push(CaseRefusal::modified(case.id(), course, revision));
+                    continue;
+                }
+            };
+            report.checked += 1;
+            report.field_departures.extend(departures);
             let expected = case.expected()?;
-            let actual = case.run(&mut run)?;
-            let allow_discrete =
-                (discrete.len() + 1) as Real / checked as Real <= limits.discrete_share;
-            discrete.extend(compare_case(
+            match compare_case(
                 &case,
                 &expected,
                 &actual,
                 &limits,
-                allow_discrete,
-                &skipped,
-            )?);
+                limits.discrete_share > 0.0,
+            )? {
+                (Some(difference), true) => report.failures.push(difference.to_string()),
+                (Some(difference), false) => discrete.push(difference),
+                (None, _) => {}
+            }
         }
-        Ok(CheckReport {
-            checked,
-            discrete,
-            skipped,
-        })
+        for difference in discrete {
+            if (report.discrete.len() + 1) as Real / report.checked as Real <= limits.discrete_share
+            {
+                report.discrete.push(difference);
+            } else {
+                report.failures.push(difference.to_string());
+            }
+        }
+        if !report.failures.is_empty()
+            || exceeds_refusal_limit(&report.refused, report.case_count())
+        {
+            return Err(CheckFailure(report).into());
+        }
+        Ok(report)
     }
 }
 
@@ -962,6 +1163,9 @@ pub struct DriftReport {
     pub numeric: BTreeMap<String, FieldDrift>,
     pub discrete: Vec<Difference>,
     pub skipped: Vec<Departure>,
+    pub refused: Vec<CaseRefusal>,
+    pub field_departures: Vec<FieldDeparture>,
+    failures: Vec<String>,
     #[cfg(test)]
     pub(crate) out_of_bounds: Vec<Difference>,
 }
@@ -970,6 +1174,13 @@ impl fmt::Display for DriftReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for departure in &self.skipped {
             writeln!(f, "{departure}")?;
+        }
+        write_refusals(f, &self.refused)?;
+        for departure in &self.field_departures {
+            writeln!(f, "{departure}")?;
+        }
+        for failure in &self.failures {
+            writeln!(f, "{failure}")?;
         }
         for (field, drift) in &self.numeric {
             writeln!(
@@ -997,18 +1208,46 @@ impl Fixture {
         layer: &str,
         mut run: impl FnMut(&Dict) -> Result<Variant, E>,
     ) -> CorpusResult<DriftReport> {
+        self.drift_cases(layer, |case| run(case).map(Into::into))
+    }
+
+    pub(crate) fn drift_cases<E: fmt::Display>(
+        &self,
+        layer: &str,
+        mut run: impl FnMut(&Dict) -> Result<CaseOutcome, E>,
+    ) -> CorpusResult<DriftReport> {
         self.require_layer(layer)?;
         let limits =
             Layer::load(&self.testdata.join(TOLERANCES), self.key(), layer)?.unwrap_or_default();
         let default = limits.default_bounds();
         let (cases, skipped) = self.selected_cases()?;
+        let total = cases.len() + skipped.len();
         let mut report = DriftReport {
             skipped,
             ..DriftReport::default()
         };
         for case in cases {
             let expected = case.expected()?;
-            let actual = case.run(&mut run)?;
+            let actual = match run(case.fields) {
+                Ok(CaseOutcome::Compared { actual, departures }) => {
+                    report.field_departures.extend(departures);
+                    actual
+                }
+                Ok(CaseOutcome::Refused(reason)) => {
+                    report.refused.push(CaseRefusal::other(case.id(), reason));
+                    continue;
+                }
+                Ok(CaseOutcome::ModifiedCourse { course, revision }) => {
+                    report
+                        .refused
+                        .push(CaseRefusal::modified(case.id(), course, revision));
+                    continue;
+                }
+                Err(error) => {
+                    report.failures.push(case.run_error(error));
+                    continue;
+                }
+            };
             let fields = OutputFields::new(&expected, &actual);
             let scales = case.source_scales(&limits, &default, || &fields)?;
             let input_scale = |path: &str| {
@@ -1064,6 +1303,61 @@ impl Fixture {
                 report.discrete.push(case.difference(&field, None));
             }
         }
+        if exceeds_refusal_limit(&report.refused, total) {
+            return Err(format!("{report}refusals exceed 1% of fixture cases").into());
+        }
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+    use golf_sim_base::variant::Array;
+
+    #[test]
+    fn refusals_are_listed_and_do_not_stop_later_comparisons() {
+        for (total, passes_cap) in [(100, true), (99, false)] {
+            let rows = (0..total)
+                .map(|i| {
+                    object([
+                        ("id", Variant::String(i.to_string())),
+                        ("output", Variant::Bool(true)),
+                    ])
+                })
+                .collect();
+            let header = object([
+                ("layer", "physics/flight".into()),
+                ("cases", Variant::Array(Array::new(rows))),
+            ]);
+            let Variant::Dict(header) = header else {
+                unreachable!()
+            };
+            let fixture = Fixture::from_header(header, PathBuf::from("testdata"));
+            let mut ran = 0;
+            let check = fixture.check_cases("physics", |_| {
+                ran += 1;
+                Ok::<_, std::convert::Infallible>(if ran == 1 {
+                    CaseOutcome::Refused("unsupported air sampler".into())
+                } else if ran <= 4 {
+                    CaseOutcome::ModifiedCourse {
+                        course: "synthetic".into(),
+                        revision: if ran == 4 { "another" } else { "revision" }.into(),
+                    }
+                } else {
+                    Variant::Bool(true).into()
+                })
+            });
+            assert_eq!(ran, total);
+            assert_eq!(check.is_ok(), passes_cap);
+            let printed = match check {
+                Ok(report) => report.to_string(),
+                Err(error) => error.to_string(),
+            };
+            assert!(printed.contains("refused case \"0\": unsupported air sampler"));
+            assert!(printed.contains("modified copy of synthetic, revision \"revision\": 2 cases"));
+            assert!(printed.contains("modified copy of synthetic, revision \"another\": 1 cases"));
+            assert_eq!(printed.contains("refusals exceed 1%"), !passes_cap);
+        }
     }
 }
