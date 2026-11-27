@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 (2026-11-27)
 
 - **Validation and reference fixtures.** One local data folder supplies validation targets with the `local` verdict and extra fixture cases. Target files declare their fit roles.
+- **`golf corpus` on a consumer's real courses.** The runners reach every case. A case the core cannot rerun is refused with its reason and listed; a test's modified course copy is listed by revision and kept out of the 1% refusal cap, and a course entry that cannot be read counts toward it. A fixture recorded with earlier tunables departs by field for each later model change. Differences that come from the earlier implementation's single-precision rounding are bounded per case from that rounding (zones, crossings, rays, obstacles, the cup, the stance slope, the strike, carry and bunker launches), each with a synthetic test where a wrong core answer fails. A stroke departs as a precision difference only when a run-time check proves it, and a preview is checked from its recorded operand shots.
+- **Rays.** The ray march finds the first crown entry, including at a cone's tip.
+- **`golf sweep`.** A resume is refused only for a different format or model version, never for the release number alone, and a failed play becomes an error row.
+- **Builds with Rust 1.94 again.**
 
 ## 0.2.1 (2026-11-27)
 
