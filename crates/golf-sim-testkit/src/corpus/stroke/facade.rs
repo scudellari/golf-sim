@@ -405,11 +405,12 @@ fn exceeds_default(a: Real, b: Real, scale: Real) -> bool {
 struct DerivedChecks<'a> {
     id: &'a str,
     drift: bool,
+    failure: Option<String>,
 }
 
 impl DerivedChecks<'_> {
     fn number(
-        &self,
+        &mut self,
         expected: &Dict,
         actual: &mut Dict,
         key: &str,
@@ -421,11 +422,12 @@ impl DerivedChecks<'_> {
         let error = (a - b).abs();
         if exceeds_default(a, b, a.abs().max(b.abs())) {
             let bound = allowed(a, b);
-            assert!(
-                self.drift || error <= bound,
-                "{} {key}: {error} exceeds {bound} ({reason})",
-                self.id
-            );
+            if !(self.drift || error <= bound) {
+                self.failure.get_or_insert_with(|| {
+                    format!("{key}: {error:.6e} exceeds {bound:.6e} ({reason})")
+                });
+                return;
+            }
             let relation = if error <= bound { "≤" } else { ">" };
             println!(
                 "{} {key}: {error:.6e} {relation} {bound:.6e} ({reason})",
@@ -437,7 +439,7 @@ impl DerivedChecks<'_> {
         }
     }
 
-    fn launch(&self, expected: &Dict, actual: &mut Dict, standalone: bool) {
+    fn launch(&mut self, expected: &Dict, actual: &mut Dict, standalone: bool) {
         let a = vector3(field(expected, "velocity"));
         let b = vector3(field(actual, "velocity"));
         let angular_change = fm::atan2(a.cross(b).length(), a.dot(b));
@@ -506,7 +508,7 @@ impl DerivedChecks<'_> {
     }
 
     fn outcome(
-        &self,
+        &mut self,
         expected: &Dict,
         actual: &mut Dict,
         expected_shot: &Dict,
@@ -634,9 +636,10 @@ fn check_derived_fields(
     actual: &mut Variant,
     drift: bool,
 ) -> Result<(), String> {
-    let checks = DerivedChecks {
+    let mut checks = DerivedChecks {
         id: field(case, "id").as_str().unwrap(),
         drift,
+        failure: None,
     };
     let expected = dict(field(case, "output"));
     let actual = fields_mut(actual);
@@ -698,7 +701,7 @@ fn check_derived_fields(
         }
         _ => {}
     }
-    Ok(())
+    checks.failure.map_or(Ok(()), Err)
 }
 
 pub(in crate::corpus) fn run(
@@ -711,4 +714,32 @@ pub(in crate::corpus) fn run(
     let mut actual = replay(case, &world);
     check_derived_fields(case, &world, &mut actual, drift)?;
     Ok(actual)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derived_bound_failure_retains_the_computed_value_and_reason() {
+        let expected = record!(carry_m: 2.0);
+        let mut actual = record!(carry_m: 3.0);
+        let mut checks = DerivedChecks {
+            id: "synthetic",
+            drift: false,
+            failure: None,
+        };
+        checks.number(
+            dict(&expected),
+            fields_mut(&mut actual),
+            "carry_m",
+            "descent crossing",
+            |_, _| 0.25,
+        );
+        assert_eq!(number(dict(&actual), "carry_m"), 3.0);
+        assert_eq!(
+            checks.failure.as_deref(),
+            Some("carry_m: 1.000000e0 exceeds 2.500000e-1 (descent crossing)")
+        );
+    }
 }
