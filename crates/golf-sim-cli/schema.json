@@ -1,0 +1,2035 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Message",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Reply"
+    }
+  ],
+  "protocol": 1,
+  "$defs": {
+    "Acted": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "$ref": "#/$defs/Prompt"
+        },
+        "ruling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ruling"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stroke": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlayedStroke"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "AddressReading": {
+      "type": "object",
+      "properties": {
+        "aim": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "aim_point": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "club": {
+          "$ref": "#/$defs/ClubId2"
+        },
+        "club_length_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "club_lie_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_half_width_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_height_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_is_wood": {
+          "type": "boolean"
+        },
+        "flagstick_in": {
+          "type": "boolean"
+        },
+        "landing": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "putting": {
+          "type": "boolean"
+        },
+        "stance": {
+          "$ref": "#/$defs/Stance"
+        },
+        "stock_carry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "club",
+        "club_length_m",
+        "club_lie_rad",
+        "face_half_width_m",
+        "face_height_m",
+        "face_is_wood",
+        "putting",
+        "aim",
+        "aim_point",
+        "flagstick_in",
+        "stance"
+      ]
+    },
+    "Advice": {
+      "type": "object",
+      "properties": {
+        "aim_point": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "club": {
+          "$ref": "#/$defs/ClubId"
+        }
+      },
+      "required": [
+        "club",
+        "aim_point"
+      ]
+    },
+    "AimChoice": {
+      "type": "object",
+      "properties": {
+        "aim_at": {
+          "$ref": "#/$defs/AimPoint"
+        },
+        "club": {
+          "$ref": "#/$defs/ClubId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "club",
+        "aim_at"
+      ]
+    },
+    "AimPoint": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      ]
+    },
+    "Aloft": {
+      "type": "string",
+      "enum": [
+        "same",
+        "more",
+        "less"
+      ]
+    },
+    "Aloft2": {
+      "type": "string",
+      "enum": [
+        "same",
+        "more",
+        "less"
+      ]
+    },
+    "AlongWind": {
+      "type": "string",
+      "enum": [
+        "into",
+        "helping"
+      ]
+    },
+    "Ball": {
+      "type": "object",
+      "properties": {
+        "lie": {
+          "$ref": "#/$defs/Surface"
+        },
+        "spot": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "required": [
+        "spot",
+        "lie"
+      ]
+    },
+    "CardStroke": {
+      "type": "object",
+      "properties": {
+        "club": {
+          "$ref": "#/$defs/ClubId2"
+        },
+        "distance": {
+          "$ref": "#/$defs/Distance"
+        },
+        "from": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "number": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "penalties": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "rest": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "rest_surface": {
+          "$ref": "#/$defs/Surface2"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        }
+      },
+      "required": [
+        "number",
+        "club",
+        "from",
+        "rest",
+        "distance",
+        "rest_surface",
+        "status",
+        "penalties"
+      ]
+    },
+    "ClubId": {
+      "type": "string",
+      "enum": [
+        "driver",
+        "3wood",
+        "hybrid",
+        "4iron",
+        "5iron",
+        "6iron",
+        "7iron",
+        "8iron",
+        "9iron",
+        "pw",
+        "gw",
+        "sw",
+        "lw",
+        "putter"
+      ]
+    },
+    "ClubId2": {
+      "type": "string",
+      "enum": [
+        "driver",
+        "3wood",
+        "hybrid",
+        "4iron",
+        "5iron",
+        "6iron",
+        "7iron",
+        "8iron",
+        "9iron",
+        "pw",
+        "gw",
+        "sw",
+        "lw",
+        "putter"
+      ]
+    },
+    "Contact": {
+      "type": "string",
+      "enum": [
+        "face",
+        "leading_edge",
+        "top_edge",
+        "sand",
+        "side_edge",
+        "miss"
+      ]
+    },
+    "CrossWind": {
+      "type": "string",
+      "enum": [
+        "from_left",
+        "from_right"
+      ]
+    },
+    "Decision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "stroke": {
+              "$ref": "#/$defs/Stroke"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "stroke"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "go_forward": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "go_forward"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "relief": {
+              "type": "object",
+              "properties": {
+                "footprint": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "double"
+                    },
+                    "maxItems": 2,
+                    "minItems": 2
+                  }
+                },
+                "option": {
+                  "$ref": "#/$defs/ReliefOption"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "option"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "relief"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "drop": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "double"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "at"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "drop"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "double"
+                  },
+                  "maxItems": 3,
+                  "minItems": 3
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "at"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "place"
+          ]
+        }
+      ]
+    },
+    "Distance": {
+      "type": "object",
+      "properties": {
+        "display": {
+          "$ref": "#/$defs/DistanceDisplay"
+        },
+        "exact_m": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "exact_m",
+        "display"
+      ]
+    },
+    "DistanceDisplay": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "yards": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "yards"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tenths_of_feet": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "tenths_of_feet"
+          ]
+        }
+      ]
+    },
+    "End": {
+      "type": "string",
+      "enum": [
+        "at_rest",
+        "holed",
+        "in_water",
+        "timed_out"
+      ]
+    },
+    "End2": {
+      "type": "string",
+      "enum": [
+        "at_rest",
+        "holed",
+        "in_water",
+        "timed_out"
+      ]
+    },
+    "ExactSwing": {
+      "type": "object",
+      "properties": {
+        "power": {
+          "type": "number",
+          "format": "double"
+        },
+        "strike_m": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "timing_fault": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "power",
+        "timing_fault"
+      ]
+    },
+    "GreenOverlay": {
+      "type": "object",
+      "properties": {
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GreenSample"
+          }
+        },
+        "speed_m": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "speed_m",
+        "samples"
+      ]
+    },
+    "GreenReading": {
+      "type": "object",
+      "properties": {
+        "fall": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "overlay": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GreenOverlay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fall"
+      ]
+    },
+    "GreenSample": {
+      "type": "object",
+      "properties": {
+        "fall": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "point": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "required": [
+        "point",
+        "fall"
+      ]
+    },
+    "HoleInfo": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "par": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "required": [
+        "number",
+        "par"
+      ]
+    },
+    "Mode": {
+      "type": "string",
+      "enum": [
+        "caddie",
+        "tour"
+      ]
+    },
+    "Observed": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AddressReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "advice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Advice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ball": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ball"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cup": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "flag_rise_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "green": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GreenReading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hole": {
+          "$ref": "#/$defs/HoleInfo"
+        },
+        "last_stroke": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShotReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "prompt": {
+          "$ref": "#/$defs/Prompt"
+        },
+        "protocol": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "relief_available": {
+          "type": "boolean"
+        },
+        "relief_offers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReliefOffer"
+          }
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "strokes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "to_cup_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "to_flag": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Wind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "protocol",
+        "prompt",
+        "hole",
+        "strokes",
+        "mode",
+        "score",
+        "cup",
+        "relief_available",
+        "relief_offers"
+      ]
+    },
+    "PlayedStroke": {
+      "type": "object",
+      "properties": {
+        "carry_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "end": {
+          "$ref": "#/$defs/End2"
+        },
+        "lie": {
+          "$ref": "#/$defs/Surface"
+        },
+        "rest": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "total_m": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "end",
+        "carry_m",
+        "total_m",
+        "lie",
+        "rest"
+      ]
+    },
+    "PreviewReading": {
+      "type": "object",
+      "properties": {
+        "aloft": {
+          "$ref": "#/$defs/Aloft"
+        },
+        "carry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "carry_to_target_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "displayed_plays_like_yd": {
+          "description": "The Caddie's nearest-five-yard read when the adjustment is noticeable.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "nominal_carry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nominal_roll": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Distance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plays_like_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "putt_line": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "maxItems": 3,
+            "minItems": 3
+          }
+        },
+        "wind_aloft_mps": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "required": [
+        "putt_line",
+        "aloft",
+        "wind_aloft_mps"
+      ]
+    },
+    "Previewed": {
+      "type": "object",
+      "properties": {
+        "carry_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "carry_to_target_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "plays_like_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "putt_line": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "maxItems": 3,
+            "minItems": 3
+          }
+        },
+        "roll_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "target_distance_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "wind_aloft": {
+          "$ref": "#/$defs/Aloft2"
+        },
+        "wind_aloft_mps": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "wind_here_mps": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "required": [
+        "wind_aloft",
+        "wind_aloft_mps",
+        "wind_here_mps",
+        "putt_line"
+      ]
+    },
+    "ProfileName": {
+      "type": "string",
+      "enum": [
+        "scratch",
+        "hcp15"
+      ]
+    },
+    "Prompt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "play": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "play"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "maybe_lost": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "maybe_lost"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "choose": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "choose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "drop": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "drop"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "place"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "done": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "done"
+          ]
+        }
+      ]
+    },
+    "PromptKind": {
+      "type": "string",
+      "enum": [
+        "play",
+        "maybe_lost",
+        "choose",
+        "drop",
+        "place",
+        "done"
+      ]
+    },
+    "Refused": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "malformed": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "malformed"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "unknown_op": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "unknown_op"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "not_now": {
+              "type": "object",
+              "properties": {
+                "prompt": {
+                  "$ref": "#/$defs/PromptKind"
+                }
+              },
+              "required": [
+                "prompt"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "not_now"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "missing_swing": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "missing_swing"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "preview_unavailable": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "preview_unavailable"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "invalid": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "$ref": "#/$defs/PromptKind"
+                }
+              },
+              "required": [
+                "prompt",
+                "message"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "invalid"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "bad_path": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "message"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "bad_path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "record": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "record"
+          ]
+        }
+      ]
+    },
+    "ReliefOffer": {
+      "type": "object",
+      "properties": {
+        "option": {
+          "$ref": "#/$defs/ReliefOption2"
+        },
+        "penalty_strokes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "option",
+        "penalty_strokes"
+      ]
+    },
+    "ReliefOption": {
+      "type": "string",
+      "enum": [
+        "cancel",
+        "stroke_and_distance",
+        "back_on_line",
+        "lateral",
+        "outside_bunker",
+        "temporary_water",
+        "ground_under_repair",
+        "immovable_obstruction",
+        "embedded",
+        "bunker_abnormal_outside",
+        "provisional"
+      ]
+    },
+    "ReliefOption2": {
+      "type": "string",
+      "enum": [
+        "cancel",
+        "stroke_and_distance",
+        "back_on_line",
+        "lateral",
+        "outside_bunker",
+        "temporary_water",
+        "ground_under_repair",
+        "immovable_obstruction",
+        "embedded",
+        "bunker_abnormal_outside",
+        "provisional"
+      ]
+    },
+    "Reply": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": true,
+            "ok": {
+              "$ref": "#/$defs/Success"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "ok"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": true,
+            "refused": {
+              "$ref": "#/$defs/Refused"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "refused"
+          ]
+        }
+      ]
+    },
+    "Request": {
+      "type": "object",
+      "properties": {
+        "id": true
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "observe"
+            }
+          },
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "legal"
+            }
+          },
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "preview"
+            },
+            "stroke": {
+              "$ref": "#/$defs/AimChoice"
+            }
+          },
+          "required": [
+            "op",
+            "stroke"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/Decision"
+            },
+            "op": {
+              "type": "string",
+              "const": "act"
+            }
+          },
+          "required": [
+            "op",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "record"
+            }
+          },
+          "required": [
+            "op"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string",
+              "const": "save"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "op",
+            "path"
+          ]
+        }
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "Ruling": {
+      "type": "object",
+      "properties": {
+        "penalty_strokes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "place_at": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "spot": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        }
+      },
+      "required": [
+        "penalty_strokes"
+      ]
+    },
+    "Score": {
+      "type": "object",
+      "properties": {
+        "card": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardStroke"
+          }
+        },
+        "length_yd": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "next_stroke": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "number": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "par": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "penalties": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "provisional": {
+          "type": "boolean"
+        },
+        "strokes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "to_par": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "required": [
+        "number",
+        "par",
+        "length_yd",
+        "strokes",
+        "penalties",
+        "to_par",
+        "provisional",
+        "card"
+      ]
+    },
+    "ShotCause": {
+      "type": "string",
+      "enum": [
+        "none",
+        "timing",
+        "strike",
+        "power"
+      ]
+    },
+    "ShotReport": {
+      "type": "object",
+      "properties": {
+        "apex_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "attack_angle_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "ball_speed_mps": {
+          "type": "number",
+          "format": "double"
+        },
+        "best_up_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "carry": {
+          "$ref": "#/$defs/Distance"
+        },
+        "cause": {
+          "$ref": "#/$defs/ShotCause"
+        },
+        "club": {
+          "$ref": "#/$defs/ClubId2"
+        },
+        "club_path_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "club_speed_mps": {
+          "type": "number",
+          "format": "double"
+        },
+        "contact": {
+          "$ref": "#/$defs/Contact"
+        },
+        "dynamic_loft_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "end": {
+          "$ref": "#/$defs/End"
+        },
+        "face_angle_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_center_height_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_half_width_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_height_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "face_to_path_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "fat": {
+          "type": "boolean"
+        },
+        "hang_time_s": {
+          "type": "number",
+          "format": "double"
+        },
+        "is_wood": {
+          "type": "boolean"
+        },
+        "land_angle_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "launch_angle_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "launch_direction_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "offline": {
+          "$ref": "#/$defs/Distance"
+        },
+        "on_time": {
+          "type": "boolean"
+        },
+        "power": {
+          "type": "number",
+          "format": "double"
+        },
+        "proximity": {
+          "$ref": "#/$defs/Distance"
+        },
+        "quality": {
+          "$ref": "#/$defs/StrikeQuality"
+        },
+        "smash_factor": {
+          "type": "number",
+          "format": "double"
+        },
+        "spin_axis_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "spin_rate_rad_s": {
+          "type": "number",
+          "format": "double"
+        },
+        "strike_toe_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "strike_up_m": {
+          "type": "number",
+          "format": "double"
+        },
+        "target_power": {
+          "type": "number",
+          "format": "double"
+        },
+        "timed_out": {
+          "type": "boolean"
+        },
+        "timing_error_s": {
+          "type": "number",
+          "format": "double"
+        },
+        "timing_fault": {
+          "type": "number",
+          "format": "double"
+        },
+        "total": {
+          "$ref": "#/$defs/Distance"
+        },
+        "total_offline": {
+          "$ref": "#/$defs/Distance"
+        }
+      },
+      "required": [
+        "club",
+        "end",
+        "quality",
+        "contact",
+        "cause",
+        "carry",
+        "total",
+        "offline",
+        "total_offline",
+        "proximity",
+        "apex_m",
+        "hang_time_s",
+        "land_angle_rad",
+        "ball_speed_mps",
+        "launch_angle_rad",
+        "launch_direction_rad",
+        "spin_rate_rad_s",
+        "spin_axis_rad",
+        "club_speed_mps",
+        "smash_factor",
+        "attack_angle_rad",
+        "club_path_rad",
+        "face_angle_rad",
+        "face_to_path_rad",
+        "dynamic_loft_rad",
+        "strike_toe_m",
+        "strike_up_m",
+        "best_up_m",
+        "face_half_width_m",
+        "face_height_m",
+        "face_center_height_m",
+        "is_wood",
+        "fat",
+        "power",
+        "target_power",
+        "timing_error_s",
+        "timing_fault",
+        "timed_out",
+        "on_time"
+      ]
+    },
+    "Stance": {
+      "type": "object",
+      "properties": {
+        "across_deg": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "along_deg": {
+          "description": "Positive is uphill along the line or ball above feet across it.",
+          "type": "integer",
+          "format": "int64"
+        },
+        "ball_slope_along_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "club_entry_surface": {
+          "$ref": "#/$defs/Surface2"
+        },
+        "lead_foot_surface": {
+          "$ref": "#/$defs/Surface2"
+        },
+        "slope_across_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "slope_along_rad": {
+          "type": "number",
+          "format": "double"
+        },
+        "trail_foot_surface": {
+          "$ref": "#/$defs/Surface2"
+        }
+      },
+      "required": [
+        "slope_along_rad",
+        "slope_across_rad",
+        "ball_slope_along_rad",
+        "along_deg",
+        "across_deg",
+        "lead_foot_surface",
+        "trail_foot_surface",
+        "club_entry_surface"
+      ]
+    },
+    "Status": {
+      "type": "string",
+      "enum": [
+        "holed",
+        "out_of_bounds",
+        "lost",
+        "in_water",
+        "in_play",
+        "penalty_area",
+        "doubtful"
+      ]
+    },
+    "StrikeQuality": {
+      "type": "string",
+      "enum": [
+        "pure",
+        "solid",
+        "mishit"
+      ]
+    },
+    "Stroke": {
+      "type": "object",
+      "properties": {
+        "aim_at": {
+          "$ref": "#/$defs/AimPoint"
+        },
+        "club": {
+          "$ref": "#/$defs/ClubId"
+        },
+        "swing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwingChoice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "club",
+        "aim_at"
+      ]
+    },
+    "Success": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Observed"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Decision"
+              }
+            }
+          },
+          "required": [
+            "actions"
+          ]
+        },
+        {
+          "$ref": "#/$defs/Previewed"
+        },
+        {
+          "$ref": "#/$defs/Acted"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "bytes": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0
+              }
+            }
+          },
+          "required": [
+            "bytes"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "Surface": {
+      "type": "string",
+      "enum": [
+        "tee",
+        "fairway",
+        "first_cut",
+        "rough",
+        "deep_rough",
+        "fringe",
+        "green",
+        "bunker",
+        "hardpan",
+        "cart_path",
+        "water"
+      ]
+    },
+    "Surface2": {
+      "type": "string",
+      "enum": [
+        "tee",
+        "fairway",
+        "first_cut",
+        "rough",
+        "deep_rough",
+        "fringe",
+        "green",
+        "bunker",
+        "hardpan",
+        "cart_path",
+        "water"
+      ]
+    },
+    "SwingChoice": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "exact": {
+              "$ref": "#/$defs/ExactSwing"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "exact"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "profile": {
+              "$ref": "#/$defs/ProfileName"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "profile"
+          ]
+        }
+      ]
+    },
+    "Wind": {
+      "type": "object",
+      "properties": {
+        "across_aim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrossWind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "along_aim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AlongWind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at_heights_mps": {
+          "description": "Wind at 0.01, 0.03, 0.06, 0.15, 0.4 and 1 metre above the ground.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "maxItems": 3,
+            "minItems": 3
+          }
+        },
+        "displayed_temperature_c": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "felt_mph": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "felt_mps": {
+          "type": "number",
+          "format": "double"
+        },
+        "felt_vector_mps": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "flag_mps": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "from_deg": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "ground_mps": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "temperature_c": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "under_trees": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "felt_vector_mps",
+        "felt_mps",
+        "felt_mph",
+        "flag_mps",
+        "under_trees",
+        "ground_mps",
+        "at_heights_mps"
+      ]
+    }
+  }
+}

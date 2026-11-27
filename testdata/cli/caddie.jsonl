@@ -1,0 +1,12 @@
+{"id":1,"op":"observe"}
+{"id":2,"op":"legal"}
+{"id":3,"op":"preview","stroke":{"club":"driver","aim_at":[414.1443390391715,65.55112080827912]}}
+{"id":4,"op":"act","action":{"stroke":{"club":"driver","aim_at":[414.1443390391715,65.55112080827912],"swing":{"exact":{"power":1.0,"timing_fault":0.0,"strike_m":[0.0,0.0]}}}}}
+{"id":5,"op":"act","action":{"drop":{"at":[1.0,2.0,3.0]}}}
+{"id":6,"op":"observe"}
+{"id":7,"op":"act","action":{"stroke":{"club":"lw","aim_at":[414.0,72.5],"swing":{"exact":{"power":0.76,"timing_fault":0.0,"strike_m":[0.0,0.0]}}}}}
+{"id":8,"op":"preview","stroke":{"club":"putter","aim_at":[414.0,74.0]}}
+{"id":9,"op":"act","action":{"stroke":{"club":"putter","aim_at":[414.0,74.0],"swing":{"exact":{"power":0.61,"timing_fault":0.0,"strike_m":[0.0,0.0]}}}}}
+{"id":10,"op":"observe"}
+{"id":11,"op":"legal"}
+{"id":12,"op":"save","path":"target/c27-caddie.rec"}

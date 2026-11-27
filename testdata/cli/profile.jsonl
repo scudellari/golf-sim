@@ -1,0 +1,5 @@
+{"id":"start","op":"observe"}
+{"id":"drive","op":"act","action":{"stroke":{"club":"driver","aim_at":[414.1443390391715,65.55112080827912]}}}
+{"id":"approach","op":"act","action":{"stroke":{"club":"lw","aim_at":[414.0,73.0]}}}
+{"id":"after","op":"observe"}
+{"id":"save","op":"save","path":"target/c27-profile.rec"}
