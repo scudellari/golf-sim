@@ -498,7 +498,7 @@ fn mown_rough_lowers_iron_launch_and_taller_rough_cuts_spin() {
 }
 
 #[test]
-fn fairway_and_tee_match_physics_0_11_1_bits() {
+fn short_lies_match_physics_0_11_1_bits() {
     // Launch velocity and spin from 0.11.1, including cover and a nonzero film
     // in the tall stands so the old friction and restitution both get exercised.
     let cases = [
@@ -556,6 +556,35 @@ fn fairway_and_tee_match_physics_0_11_1_bits() {
                 0x4081_db97_d740_8281,
                 0x4034_00da_7029_93b2,
                 0xbff9_9a9b_e70e_bc3b,
+            ],
+        ),
+        // Dense stands make the film's cover factor affect launch through face friction.
+        (
+            Surface::Fringe,
+            0.004,
+            0.075,
+            0.55,
+            [
+                0xbfee_cb98_6a6e_4c82,
+                0x4028_e508_d488_c271,
+                0xc044_fca3_046e_13f5,
+                0x4080_243f_e342_983f,
+                0x403f_5a1e_3699_bf22,
+                0xc004_5ccc_c1a9_f048,
+            ],
+        ),
+        (
+            Surface::Green,
+            0.002,
+            0.065,
+            0.60,
+            [
+                0xbff0_45a6_849d_68bc,
+                0x402b_861c_531a_ccd0,
+                0xc045_cd92_fd4a_493a,
+                0x407b_9a61_806c_82d9,
+                0x403b_9891_d9a4_fe1f,
+                0xbff9_7572_ccff_4bbb,
             ],
         ),
     ];
