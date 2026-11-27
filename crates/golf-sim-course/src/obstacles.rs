@@ -240,6 +240,13 @@ fn ray_crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, limit: Real) -> O
         let a = travel.length_squared() - vertical * vertical;
         let b = radial.dot(travel) + from_tip * vertical;
         let c = radial.length_squared() - from_tip * from_tip;
+        if a == 0.0 && b == 0.0 && c == 0.0 {
+            // The whole ray lies on the extended cone. Clip it to the crown's height.
+            let tip_contact = (height - start.y) / direction.y;
+            let entry = base_contact.min(tip_contact).max(0.0);
+            let exit = base_contact.max(tip_contact).min(limit);
+            return (entry <= exit).then_some(entry);
+        }
         return [base_entry]
             .into_iter()
             .chain(ray_roots(a, b, c))
@@ -265,7 +272,10 @@ fn ray_crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, limit: Real) -> O
 
 fn ray_roots(a: Real, b: Real, c: Real) -> [Real; 2] {
     if a == 0.0 {
-        return [-c / (2.0 * b), Real::INFINITY];
+        if b != 0.0 {
+            return [-c / (2.0 * b), Real::INFINITY];
+        }
+        return [Real::INFINITY; 2];
     }
     let determinant = b * b - a * c;
     let nearer = -b - fm::sqrt(determinant).copysign(b);
@@ -448,5 +458,26 @@ mod tests {
             ray_crown_entry(&tree, origin + along * 2.0, along, 1.0),
             Some(0.0)
         );
+    }
+
+    #[test]
+    fn ray_along_a_conical_crown_hits_first_at_the_tip() {
+        let tree = Tree {
+            id: "synthetic".into(),
+            species_index: 0,
+            base: Vec3::ZERO,
+            height_m: 5.0,
+            trunk_radius_m: 0.05,
+            crown_base_m: 1.0,
+            crown_radius_m: 4.0,
+            density: 1.0,
+            cone: true,
+        };
+        let origin = Vec3::new(1.0, 6.0, 0.0);
+        let direction = Vec3::new(-1.0, -1.0, 0.0).normalized();
+        let distance = ray_crown_entry(&tree, origin, direction, 6.0).unwrap();
+        assert!((distance - fm::sqrt(2.0)).abs() <= 1e-12);
+        assert_eq!(ray_crown_entry(&tree, origin, direction, 1.0), None);
+        assert_eq!(ray_crown_entry(&tree, origin, -direction, 6.0), None);
     }
 }

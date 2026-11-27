@@ -397,6 +397,15 @@ impl RayErrors {
             .filter(|v| v.is_finite())
             .flat_map(|v| [v.x.abs(), v.y.abs(), v.z.abs()])
             .fold(1.0, Real::max);
+        if actual.is_finite() {
+            let off_ray = (actual - origin - direction * actual_along.max(0.0)).length();
+            self.core_ray.record(
+                id,
+                "point",
+                off_ray * 1000.0,
+                64.0 * Real::EPSILON * scale * 1000.0,
+            );
+        }
         let reference_departure = || {
             let (sampled, steps) = queries.sampled_ray(origin, direction, max);
             let rounding_m =
@@ -421,23 +430,9 @@ impl RayErrors {
         self.hits += 1;
         // A 25 m march step refined 14 times resolves 1.53 mm, with additional drift
         // from the reference's single-precision positions.
-        for (errors, point, along, limit) in [
-            (
-                &mut self.reference_ray,
-                expected,
-                expected_along,
-                RAY_TOLERANCE_M,
-            ),
-            (
-                &mut self.core_ray,
-                actual,
-                actual_along,
-                64.0 * Real::EPSILON * scale,
-            ),
-        ] {
-            let off_ray = (point - origin - direction * along.max(0.0)).length();
-            errors.record(id, "point", off_ray * 1000.0, limit * 1000.0);
-        }
+        let off_ray = (expected - origin - direction * expected_along.max(0.0)).length();
+        self.reference_ray
+            .record(id, "point", off_ray * 1000.0, RAY_TOLERANCE_M * 1000.0);
 
         // A ray starting inside a crown returns the first refined point in the
         // crown. There is no surface between that point and the ray's origin.
@@ -1313,7 +1308,7 @@ struct GroundBracket {
 
 fn ground_ray_entry(clearance: impl Fn(Real) -> Real, length: Real, grade: Real) -> Option<Real> {
     let start = clearance(0.0);
-    if start < 0.0 || length <= 0.0 {
+    if start < 0.0 || length <= 0.0 || grade == 0.0 {
         return None;
     }
     let mut stack = vec![GroundBracket {
@@ -1329,7 +1324,7 @@ fn ground_ray_entry(clearance: impl Fn(Real) -> Real, length: Real, grade: Real)
         above_hi,
     }) = stack.pop()
     {
-        if above_lo <= 0.0 && lo > 0.0 {
+        if above_lo < 0.0 {
             return Some(lo);
         }
         // A Lipschitz bound on height along the ray can rule out both halves at once.
@@ -1395,9 +1390,12 @@ fn crown_entry(tree: &Tree, origin: Vec3, direction: Vec3, length: Real) -> Opti
         + slope * slope * (height - start.y) * direction.y;
     let c = clearance(start);
     let discriminant = half_b * half_b - a * c;
-    let mut candidates = [Real::INFINITY; 3];
+    let mut candidates = [Real::INFINITY; 4];
     if direction.y != 0.0 {
         candidates[0] = -start.y / direction.y;
+        if a == 0.0 && half_b == 0.0 && c == 0.0 {
+            candidates[3] = (height - start.y) / direction.y;
+        }
     }
     if a.abs() < 1e-14 {
         if half_b != 0.0 {
@@ -1551,6 +1549,50 @@ mod tests {
         let first = ground_ray_entry(clearance, 250.0, 1e-5).unwrap();
         assert!(matches_ray_entry(200.0, first));
         assert!(!matches_ray_entry(100.0, first));
+    }
+
+    #[test]
+    fn a_horizontal_ray_on_flat_ground_never_enters_it() {
+        assert_eq!(ground_ray_entry(|_| 0.0, 10.0, 0.0), None);
+        // The global grade can be nonzero even if the ray stays over a flat patch.
+        assert_eq!(ground_ray_entry(|_| 0.0, 1.0, 0.1), None);
+    }
+
+    #[test]
+    fn a_reference_miss_cannot_hide_an_off_ray_hit() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/courses/test-course");
+        let course = Course::open(&path).unwrap();
+        let queries = Queries::new(&course);
+        let tree = course
+            .data()
+            .trees
+            .instances
+            .iter()
+            .find(|tree| tree.density > 0.0 && tree.height_m > tree.crown_base_m)
+            .unwrap();
+        let origin = tree.base + Vec3::new(-0.125, tree.height_m - 1e-7, 0.0);
+        let direction = Vec3::new(1.0, 0.0, 0.0);
+        let limit = 0.25;
+        assert_eq!(queries.sampled_ray(origin, direction, limit).0, NO_RAY_HIT);
+        let point = queries.obstacles.ray_hit(origin, direction, limit).unwrap();
+        let input = Dict::new(vec![
+            ("origin".into(), vector3(origin)),
+            ("direction".into(), vector3(direction)),
+            ("max_m".into(), limit.into()),
+        ]);
+        let mut rays = RayErrors::default();
+        rays.check("synthetic", &input, &queries, NO_RAY_HIT, point);
+        assert!(rays.report());
+        rays.check(
+            "synthetic",
+            &input,
+            &queries,
+            NO_RAY_HIT,
+            point + Vec3::new(0.0, 0.0, 0.25),
+        );
+        assert_eq!(rays.core_ray.outside.len(), 1);
+        assert!(!rays.report());
     }
 
     #[test]
