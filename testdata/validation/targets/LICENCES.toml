@@ -1,9 +1,9 @@
 # The licence ledger of the validation targets. Every data file in this folder is listed under the
 # dataset whose terms cover it. Verdicts: commit (openly licensed, committed with attribution), cite
 # (individual measured values with their source), fetch (downloaded when a fit runs, never committed),
-# excluded (not used). The licences are a reading of each source's terms, not legal advice.
+# excluded (not used), and local (for the ledger described in CONTRIBUTING.md).
+# The licences are a reading of each source's terms, not legal advice.
 
-# The local verdict belongs to the ledger described in CONTRIBUTING.md.
 format = 1
 checked_on = "2026-11-26"
 
