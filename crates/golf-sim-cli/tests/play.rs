@@ -7,13 +7,13 @@ use std::{
 };
 
 use golf_sim::{
-    GOLF_SIM_COMMIT,
     base::{
         digest::sha256_hex,
         variant::{self, Variant},
     },
     records::hole::{Entry, HoleRecord, decode_envelope},
 };
+use golf_sim_testkit::items::hole::{masked_record_bytes, record_for_current_build};
 use serde_json::{Value, json};
 
 const REBLESS: &str = "Raise the protocol version and re-bless with \
@@ -31,9 +31,12 @@ fn caddie_transcript_holes_out_and_saves_the_committed_record() {
     );
 
     let reference = fs::read(data().join("cli/caddie.rec")).unwrap();
-    let expected = fixture_for_build(reference);
-    assert_eq!(bytes, expected);
+    assert_eq!(masked_record_bytes(&bytes), masked_record_bytes(&reference));
     let record = HoleRecord::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        record.versions.get("release").and_then(Variant::as_str),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(record.setup.hole, 1);
     assert_eq!(record.entries.len(), 3);
     for entry in record.entries {
@@ -46,7 +49,7 @@ fn caddie_transcript_holes_out_and_saves_the_committed_record() {
         );
     }
     println!(
-        "Caddie holed out in 3 strokes, 12 replies matched, and the record matched byte for byte"
+        "Caddie holed out in 3 strokes, 12 replies matched, and the record matched after masking the build stamp"
     );
 }
 
@@ -54,9 +57,10 @@ fn caddie_transcript_holes_out_and_saves_the_committed_record() {
 fn profile_transcript_has_the_same_replies_and_record_in_three_runs() {
     let args = ["--profile", "hcp15", "--seed", "7"];
     let (_, expected) = transcript("profile", &args);
+    let expected_bytes = masked_record_bytes(&expected);
     for _ in 0..2 {
         let (_, actual) = transcript("profile", &args);
-        assert_eq!(actual, expected);
+        assert_eq!(masked_record_bytes(&actual), expected_bytes);
     }
     let record = HoleRecord::from_bytes(&expected).unwrap();
     assert_eq!(record.setup.seed.0, 7);
@@ -86,10 +90,8 @@ fn profile_transcript_has_the_same_replies_and_record_in_three_runs() {
     );
     let dir = Scratch::new();
     assert!(play(&dir, explicit.as_bytes(), &args).status.success());
-    assert_eq!(
-        fs::read(dir.0.join("target/c27-profile.rec")).unwrap(),
-        expected
-    );
+    let explicit_record = fs::read(dir.0.join("target/c27-profile.rec")).unwrap();
+    assert_eq!(masked_record_bytes(&explicit_record), expected_bytes);
     println!("All three hcp15 runs matched 5 expected replies and wrote identical records");
 }
 
@@ -134,7 +136,7 @@ fn bad_lines_are_refused_and_the_session_can_still_record_and_save() {
 fn replay_names_the_first_diverging_field_and_both_values() {
     let dir = Scratch::new();
     let path = dir.0.join("caddie.rec");
-    let mut bytes = fixture_for_build(fs::read(data().join("cli/caddie.rec")).unwrap());
+    let mut bytes = record_for_current_build(&fs::read(data().join("cli/caddie.rec")).unwrap());
     fs::write(&path, &bytes).unwrap();
     let replay = || golf().arg("replay").arg(&path).output().unwrap();
 
@@ -257,26 +259,6 @@ fn golf() -> Command {
 
 fn data() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata")
-}
-
-fn fixture_for_build(bytes: Vec<u8>) -> Vec<u8> {
-    if GOLF_SIM_COMMIT == "dev" {
-        return bytes;
-    }
-
-    // Release tests stamp their build SHA. Keep the rest of the fixture identical.
-    let mut record = decode_envelope(&bytes).unwrap();
-    let Some(Variant::Dict(versions)) = record.get_mut("versions") else {
-        panic!("expected versions");
-    };
-    *versions.get_mut("commit").unwrap() = GOLF_SIM_COMMIT.into();
-    let body = variant::encode(&Variant::Dict(record)).unwrap();
-    [
-        b"LLHOLE01".as_slice(),
-        &u32::try_from(body.len()).unwrap().to_le_bytes(),
-        body.as_slice(),
-    ]
-    .concat()
 }
 
 struct Scratch(PathBuf);

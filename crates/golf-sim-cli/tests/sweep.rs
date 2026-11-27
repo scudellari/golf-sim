@@ -2,6 +2,7 @@ use std::{
     env, fs,
     path::PathBuf,
     process::{Command, Output},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use golf_sim::base::digest::sha256_hex;
@@ -15,9 +16,11 @@ fn golf() -> Command {
     Command::new(env!("CARGO_BIN_EXE_golf"))
 }
 
-fn sweep() -> Command {
+fn sweep(dir: &Scratch) -> Command {
     let mut command = golf();
+    // Sweep's batch subprocess writes repros relative to its working directory.
     command
+        .current_dir(&dir.0)
         .arg("sweep")
         .arg("--course")
         .arg(data().join("courses/test-course"));
@@ -35,10 +38,11 @@ fn success(output: Output) -> Vec<u8> {
 
 #[test]
 fn sweep_bytes_are_independent_of_worker_count() {
+    let dir = Scratch::new();
     for format in [&[][..], &["--json"][..]] {
         let run = |jobs| {
             success(
-                sweep()
+                sweep(&dir)
                     .args([
                         "--holes",
                         "2,1",
@@ -115,8 +119,9 @@ fn sweep_bytes_are_independent_of_worker_count() {
 
 #[test]
 fn sweep_reports_score_distribution_and_totals() {
+    let dir = Scratch::new();
     let bytes = success(
-        sweep()
+        sweep(&dir)
             .args([
                 "--holes",
                 "1",
@@ -144,7 +149,8 @@ fn sweep_reports_score_distribution_and_totals() {
 
 #[test]
 fn generated_days_are_refused_until_the_generator_lands() {
-    let output = sweep()
+    let dir = Scratch::new();
+    let output = sweep(&dir)
         .args(["--days", "1-20", "--seeds", "1-1"])
         .output()
         .unwrap();
@@ -158,11 +164,30 @@ fn generated_days_are_refused_until_the_generator_lands() {
 }
 
 #[test]
+fn refused_sweep_plays_save_repros_in_scratch() {
+    let dir = Scratch::new();
+    let output = sweep(&dir)
+        .args(["--holes", "99", "--seeds", "5-5"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("hole 99"), "{error}");
+    assert!(
+        dir.0
+            .join("repros/batch-hole-99-seed-5/record.bin")
+            .is_file()
+    );
+}
+
+#[test]
 fn all_test_course_scenarios_pass() {
+    let dir = Scratch::new();
     let testdata = data();
     let bytes = success(
         golf()
-            .args(["scenario", "run"])
+            .args(["scenario", "run", "--repros"])
+            .arg(dir.0.join("repros"))
             .arg(testdata.join("scenarios"))
             .output()
             .unwrap(),
@@ -177,9 +202,7 @@ fn all_test_course_scenarios_pass() {
 
 #[test]
 fn scenario_names_the_first_failed_expectation_and_bless_repairs_it() {
-    let dir = env::temp_dir().join(format!("golf-scenario-test-{}", std::process::id()));
-    fs::create_dir(&dir).unwrap();
-    let scratch = Scratch(dir);
+    let scratch = Scratch::new();
     let file = scratch.0.join("edited.toml");
     let testdata = data();
     let mut document: toml::Table =
@@ -201,7 +224,8 @@ fn scenario_names_the_first_failed_expectation_and_bless_repairs_it() {
     fs::write(&file, toml::to_string(&document).unwrap()).unwrap();
     let run = || {
         golf()
-            .args(["scenario", "run"])
+            .args(["scenario", "run", "--repros"])
+            .arg(scratch.0.join("repros"))
             .arg(&file)
             .output()
             .unwrap()
@@ -235,6 +259,19 @@ fn scenario_names_the_first_failed_expectation_and_bless_repairs_it() {
 }
 
 struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = env::temp_dir().join(format!(
+            "golf-sweep-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
 
 impl Drop for Scratch {
     fn drop(&mut self) {

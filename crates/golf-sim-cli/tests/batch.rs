@@ -1,4 +1,12 @@
-use std::{collections::BTreeMap, env, ffi::OsStr, fs, path::PathBuf, process::Command};
+use std::{
+    collections::BTreeMap,
+    env,
+    ffi::OsStr,
+    fs,
+    path::PathBuf,
+    process::Command,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use golf_sim::{
     base::{PromptKind, Vec2, corpus, digest::sha256_hex, variant::Variant},
@@ -13,10 +21,13 @@ fn data() -> PathBuf {
 }
 
 fn batch(args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Vec<u8> {
+    let scratch = Scratch::new();
     let output = Command::new(env!("CARGO_BIN_EXE_golf"))
         .arg("batch")
         .arg("--course")
         .arg(data().join("courses/test-course"))
+        .arg("--repros")
+        .arg(scratch.0.join("repros"))
         .args(args)
         .output()
         .unwrap();
@@ -121,9 +132,7 @@ fn exact_golfer_matches_most_reference_scores() {
 
 #[test]
 fn batch_saves_replayable_records_and_continues_past_refused_plays() {
-    let dir = env::temp_dir().join(format!("golf-batch-{}", std::process::id()));
-    fs::create_dir(&dir).unwrap();
-    let records = Scratch(dir);
+    let records = Scratch::new();
     let mut args: Vec<&OsStr> = [
         "--holes",
         "99,1",
@@ -168,6 +177,19 @@ fn batch_saves_replayable_records_and_continues_past_refused_plays() {
 }
 
 struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = env::temp_dir().join(format!(
+            "golf-batch-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
 
 impl Drop for Scratch {
     fn drop(&mut self) {

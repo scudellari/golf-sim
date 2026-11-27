@@ -1,12 +1,16 @@
 use std::sync::Arc;
 
 use golf_sim::{
+    GOLF_SIM_COMMIT,
     action::{Action, StrokeChoice, Swing},
     hole::Hole,
     records::hole::HoleRecord,
     setup::HoleSetup,
 };
-use golf_sim_base::{ClubId, PromptKind, Seed, Vec2, corpus, variant::Variant};
+use golf_sim_base::{
+    ClubId, PromptKind, Seed, Vec2, corpus,
+    variant::{self, Variant},
+};
 use golf_sim_course::course::Course;
 use golf_sim_swing::hands::Profile;
 
@@ -34,14 +38,47 @@ fn open_course() -> Arc<Course> {
     Course::open(&fixture_dir().join("../courses/test-course")).unwrap()
 }
 
-fn record_value(record: &HoleRecord) -> Variant {
-    let mut record = record.clone();
-    // The release jobs inject the current commit, which changes even when play is identical.
-    *record.versions.get_mut("commit").unwrap() = "determinism".into();
-    Variant::PackedByteArray(record.to_bytes().unwrap())
+/// Mask the build stamp in a hole record or a single-stroke repro.
+pub fn masked_record_bytes(bytes: &[u8]) -> Vec<u8> {
+    with_build_stamp(bytes, "determinism", "determinism")
+}
+
+/// Restamp a fixture copy for replay, which requires the build that wrote it.
+pub fn record_for_current_build(bytes: &[u8]) -> Vec<u8> {
+    with_build_stamp(bytes, env!("CARGO_PKG_VERSION"), GOLF_SIM_COMMIT)
+}
+
+fn with_build_stamp(bytes: &[u8], release: &str, commit: &str) -> Vec<u8> {
+    let (magic, rest) = bytes.split_first_chunk::<8>().unwrap();
+    assert!(matches!(magic, b"LLHOLE01" | b"GSSTROK1"));
+    let (size, body) = rest.split_first_chunk::<4>().unwrap();
+    assert_eq!(body.len(), u32::from_le_bytes(*size) as usize);
+    let mut record = variant::decode(body).unwrap();
+    let Variant::Dict(dict) = &mut record else {
+        panic!("expected a record dictionary");
+    };
+    let Some(Variant::Dict(versions)) = dict.get_mut("versions") else {
+        panic!("expected record versions");
+    };
+    for (name, stamp) in [("release", release), ("commit", commit)] {
+        let value = versions.get_mut(name).unwrap();
+        assert!(value.as_str().is_some(), "expected a string for {name}");
+        *value = stamp.into();
+    }
+    let body = variant::encode(&record).unwrap();
+    let size = u32::try_from(body.len()).unwrap().to_le_bytes();
+    [magic.as_slice(), &size, &body].concat()
+}
+
+fn record_value(bytes: &[u8]) -> Variant {
+    Variant::PackedByteArray(masked_record_bytes(bytes))
 }
 
 fn stroke(swing: Swing) -> Variant {
+    record_value(&stroke_record(swing).to_bytes().unwrap())
+}
+
+fn stroke_record(swing: Swing) -> HoleRecord {
     let course = open_course();
     let setup = HoleSetup::standard(&course, 1, Seed(7));
     let aim = setup.tee(&course).unwrap().aim;
@@ -50,7 +87,7 @@ fn stroke(swing: Swing) -> Variant {
         .with_aim_direction(aim)
         .with_swing(swing);
     hole.act(Action::Stroke(choice)).unwrap();
-    record_value(hole.record())
+    hole.record().clone()
 }
 
 fn played_hole() -> Variant {
@@ -90,5 +127,47 @@ fn played_hole() -> Variant {
         hole.act(Action::Stroke(choice)).unwrap();
     }
     assert_eq!(hole.rules().prompt().kind, PromptKind::Done);
-    record_value(hole.record())
+    record_value(&hole.record().to_bytes().unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use golf_sim_base::digest::digest;
+
+    use super::*;
+
+    #[test]
+    fn release_and_commit_bumps_preserve_masked_record_bytes_and_digest() {
+        let mut record = stroke_record(Swing::Skill(Profile::HCP15));
+        let current = record.to_bytes().unwrap();
+        *record.versions.get_mut("release").unwrap() = "1.2.3".into();
+        *record.versions.get_mut("commit").unwrap() = "abc".into();
+        let original = record.to_bytes().unwrap();
+        *record.versions.get_mut("release").unwrap() = "9.9.9".into();
+        *record.versions.get_mut("commit").unwrap() = "deadbeef".into();
+        let rewritten = record.to_bytes().unwrap();
+
+        assert_ne!(original, rewritten);
+        assert_eq!(
+            masked_record_bytes(&current),
+            masked_record_bytes(&original)
+        );
+        assert_eq!(
+            masked_record_bytes(&original),
+            masked_record_bytes(&rewritten)
+        );
+        let original_digest = digest(&record_value(&original)).unwrap();
+        assert_eq!(original_digest, digest(&record_value(&rewritten)).unwrap());
+
+        for model in ["physics", "tuning", "rules"] {
+            let mut changed = record.clone();
+            *changed.versions.get_mut(model).unwrap() = "9.9.9".into();
+            let bytes = changed.to_bytes().unwrap();
+            assert_ne!(
+                original_digest,
+                digest(&record_value(&bytes)).unwrap(),
+                "{model}"
+            );
+        }
+    }
 }

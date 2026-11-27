@@ -6,16 +6,16 @@ use std::{
 };
 
 use golf_sim::{
-    GOLF_SIM_COMMIT,
     base::{
         ClubId,
-        bundle::Bundle,
+        bundle::{Bundle, BundleEngine},
         trace::{Phase, Source, Trace},
         variant::{self, Variant},
     },
     bundle::ReproBundle,
-    records::hole::{Entry, Refusal, decode_envelope},
+    records::hole::{Entry, Refusal},
 };
+use golf_sim_testkit::items::hole::{masked_record_bytes, record_for_current_build};
 use serde_json::{Value, json};
 
 const REVISION: &str = "82b40c2b1d877f0d5a28c48efdd2179e79e4be3ef664b69ec0f7b2e3569072eb";
@@ -204,10 +204,13 @@ fn unfamiliar_manifest_fields_survive_a_read_and_write() {
         .unwrap()
         .write(&destination.0)
         .unwrap();
-    assert_eq!(read_json(&destination.0.join("bundle.json")), manifest);
     assert_eq!(
-        fs::read(destination.0.join("record.bin")).unwrap(),
-        fs::read(original.join("record.bin")).unwrap()
+        masked_manifest(read_json(&destination.0.join("bundle.json"))),
+        masked_manifest(manifest)
+    );
+    assert_eq!(
+        masked_record_bytes(&fs::read(destination.0.join("record.bin")).unwrap()),
+        masked_record_bytes(&fs::read(original.join("record.bin")).unwrap())
     );
 }
 
@@ -285,9 +288,20 @@ fn a_hole_bundle_preserves_metadata_and_retained_attachments() {
     };
     assert_eq!(read.traces, bundle.traces);
     assert_eq!(read.log_tail, bundle.log_tail);
-    assert_eq!(read.record, bundle.record);
+    assert_eq!(
+        masked_record_bytes(&read.record),
+        masked_record_bytes(&bundle.record)
+    );
     read.write(&destination.0).unwrap();
-    for name in ["bundle.json", "record.bin", "traces.json", "log.jsonl"] {
+    assert_eq!(
+        masked_manifest(read_json(&source.0.join("bundle.json"))),
+        masked_manifest(read_json(&destination.0.join("bundle.json")))
+    );
+    assert_eq!(
+        masked_record_bytes(&fs::read(source.0.join("record.bin")).unwrap()),
+        masked_record_bytes(&fs::read(destination.0.join("record.bin")).unwrap())
+    );
+    for name in ["traces.json", "log.jsonl"] {
         assert_eq!(
             fs::read(source.0.join(name)).unwrap(),
             fs::read(destination.0.join(name)).unwrap(),
@@ -374,14 +388,15 @@ fn from_repro_writes_a_runnable_scenario_with_saved_swings() {
         );
     }
     fs::write(&scenario, source).unwrap();
+    let repros = dir.0.join("repros");
     let result = golf()
-        .current_dir(&dir.0)
-        .args(["scenario", "run"])
+        .args(["scenario", "run", "--repros"])
+        .arg(&repros)
         .arg(scenario)
         .output()
         .unwrap();
     assert!(success_text(result).contains("passed (3 strokes, score 3)"));
-    assert!(!dir.0.join("repros").exists());
+    assert!(!repros.exists());
 }
 
 #[test]
@@ -414,27 +429,16 @@ fn a_refused_batch_play_saves_its_record_under_the_requested_directory() {
 }
 
 fn lip_out_for_build(dir: &Scratch) -> PathBuf {
-    let path = fixture("lip-out");
-    if GOLF_SIM_COMMIT == "dev" {
-        return path;
-    }
-    // Release builds stamp their commit into the record.
-    let ReproBundle::Hole(mut bundle) = ReproBundle::read(&path).unwrap() else {
+    let ReproBundle::Hole(mut bundle) = ReproBundle::read(&fixture("lip-out")).unwrap() else {
         panic!("expected a hole bundle");
     };
-    let mut record = decode_envelope(&bundle.record).unwrap();
-    let Some(Variant::Dict(versions)) = record.get_mut("versions") else {
-        panic!("expected record versions");
-    };
-    *versions.get_mut("commit").unwrap() = GOLF_SIM_COMMIT.into();
-    let body = variant::encode(&Variant::Dict(record)).unwrap();
-    bundle.record.truncate(8);
-    bundle
-        .record
-        .extend_from_slice(&u32::try_from(body.len()).unwrap().to_le_bytes());
-    bundle.record.extend_from_slice(&body);
-    bundle.manifest.engine.commit = GOLF_SIM_COMMIT.into();
-    bundle.manifest.extra.get_mut("versions").unwrap()["commit"] = json!(GOLF_SIM_COMMIT);
+    bundle.record = record_for_current_build(&bundle.record);
+    let engine = BundleEngine::current();
+    let versions = bundle.manifest.extra.get_mut("versions").unwrap();
+    versions["release"] = json!(engine.release);
+    versions["commit"] = json!(engine.commit);
+    bundle.manifest.engine.release = engine.release;
+    bundle.manifest.engine.commit = engine.commit;
     let path = dir.0.join("lip-out");
     bundle.write(&path).unwrap();
     path
@@ -525,6 +529,19 @@ fn fixture(name: &str) -> PathBuf {
 
 fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+}
+
+fn masked_manifest(mut manifest: Value) -> Value {
+    for block in ["engine", "versions"] {
+        if let Some(versions) = manifest.get_mut(block) {
+            for field in ["release", "commit"] {
+                let value = versions.get_mut(field).unwrap();
+                assert!(value.is_string(), "expected a string for {block}.{field}");
+                *value = json!("determinism");
+            }
+        }
+    }
+    manifest
 }
 
 struct Scratch(PathBuf);
