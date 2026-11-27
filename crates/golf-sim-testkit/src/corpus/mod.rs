@@ -105,15 +105,16 @@ pub struct FixtureRun {
     header_course: Option<Dict>,
     courses: Courses,
     testdata: PathBuf,
-    projected_header: Option<Dict>,
+    header: Dict,
     query_checks: course::QueryChecks,
     scratch: Option<generated::WithDepartures>,
 }
 
 impl FixtureRun {
     pub fn read(path: &Path, layer: Option<&str>, course_dirs: &[PathBuf]) -> Result<Self> {
-        let envelope = corpus::read(path)?;
-        let header = envelope.as_dict().expect("validated fixture header");
+        let Variant::Dict(header) = corpus::read(path)? else {
+            unreachable!("validated fixture header");
+        };
         let key = header
             .get("layer")
             .and_then(Variant::as_str)
@@ -135,10 +136,10 @@ impl FixtureRun {
         if !roots.contains(&local_courses) {
             roots.push(local_courses);
         }
-        let header_course = child(header, "oracle")
+        let header_course = child(&header, "oracle")
             .and_then(|oracle| child(oracle, "course"))
             .cloned();
-        let scratch = generated::WithDepartures::prepare(path, &testdata, runner, header)?;
+        let scratch = generated::WithDepartures::prepare(&testdata, runner, &header)?;
         Ok(Self {
             runner,
             layer: fixture_layer.to_owned(),
@@ -147,7 +148,7 @@ impl FixtureRun {
             header_course,
             courses: Courses::new(roots),
             testdata,
-            projected_header: runner.projects().then(|| header.clone()),
+            header,
             query_checks: course::QueryChecks::default(),
             scratch,
         })
@@ -158,15 +159,17 @@ impl FixtureRun {
     }
 
     pub fn check_observing(mut self, mut observe: impl FnMut(&Dict)) -> Result<CheckReport> {
-        if let Some(projected) = self.project(false)? {
-            return tolerance::check(&projected.path(), &self.layer, |case| {
+        let header = std::mem::take(&mut self.header);
+        if self.runner.projects() {
+            let mut projected = self.project(&header, false)?;
+            return projected.fixture().check(&self.layer, |case| {
                 observe(case);
                 Ok::<_, std::convert::Infallible>(projected.actual(case))
             });
         }
-        let path = self.path_for_comparison();
+        let fixture = self.comparison(header);
         let layer = self.layer.clone();
-        let report = tolerance::check(&path, &layer, |case| {
+        let report = fixture.check(&layer, |case| {
             observe(case);
             self.run(case, false)
         });
@@ -181,12 +184,14 @@ impl FixtureRun {
     }
 
     pub fn drift(mut self) -> Result<DriftReport> {
-        if let Some(projected) = self.project(true)? {
-            return Fixture::read(&projected.path())?.drift(&self.layer, |case| {
+        let header = std::mem::take(&mut self.header);
+        if self.runner.projects() {
+            let mut projected = self.project(&header, true)?;
+            return projected.fixture().drift(&self.layer, |case| {
                 Ok::<_, std::convert::Infallible>(projected.actual(case))
             });
         }
-        let fixture = Fixture::read(&self.path_for_comparison())?;
+        let fixture = self.comparison(header);
         let layer = self.layer.clone();
         let report = fixture.drift(&layer, |case| self.run(case, true));
         if self.runner == Runner::CourseQueries {
@@ -195,45 +200,38 @@ impl FixtureRun {
         report
     }
 
-    fn path_for_comparison(&self) -> PathBuf {
-        self.scratch
-            .as_ref()
-            .map_or_else(|| self.path.clone(), generated::WithDepartures::fixture)
+    fn comparison(&self, header: Dict) -> Fixture {
+        let testdata = self.scratch.as_ref().map_or_else(
+            || self.testdata.clone(),
+            generated::WithDepartures::testdata,
+        );
+        Fixture::from_header(header, testdata)
     }
 
-    fn project(&mut self, drift: bool) -> Result<Option<projection::Projection>> {
-        let Some(header) = self.projected_header.take() else {
-            return Ok(None);
-        };
+    fn project(&mut self, header: &Dict, drift: bool) -> Result<projection::Projection> {
         let (pairs, tolerance_layer) = match self.runner {
             Runner::MathPrims | Runner::SeedStreams | Runner::GeometryCases => (
-                projection::rows(&header)
+                projection::rows(header)
                     .map(|case| foundation::project(self.runner, case, drift))
                     .collect::<Result<_>>()?,
                 None,
             ),
-            Runner::RulesRelief => (rules::project(self, &header, drift)?, Some("relief")),
-            Runner::RecordsHoles => (hole::records(self, &header, drift)?, Some("hole")),
+            Runner::RulesRelief => (rules::project(self, header, drift)?, Some("relief")),
+            Runner::RecordsHoles => (hole::records(self, header, drift)?, Some("hole")),
             Runner::HoleAdvice | Runner::HoleObserve => {
-                (hole::addresses(self, &header, drift)?, None)
+                (hole::addresses(self, header, drift)?, None)
             }
             _ => unreachable!("runner uses unprojected output"),
         };
         let departures = if self.runner == Runner::RulesRelief {
-            projection::rows(&header)
+            projection::rows(header)
                 .filter(|case| rules::uses_generated_stroke(case))
                 .map(|case| (projection::id(case), "requires the day generator"))
                 .collect()
         } else {
             Vec::new()
         };
-        Ok(Some(projection::Projection::write(
-            &header,
-            &self.testdata,
-            tolerance_layer,
-            pairs,
-            departures,
-        )?))
+        projection::Projection::prepare(header, &self.testdata, tolerance_layer, pairs, departures)
     }
 
     fn companion(&self, key: &str) -> Result<Variant> {

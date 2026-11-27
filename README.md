@@ -17,6 +17,6 @@ at your option.
 
 The measured data in `testdata/validation/targets/` is not covered by these licences. Each file keeps the terms of its source, which [`LICENCES.toml`](testdata/validation/targets/LICENCES.toml) lists with the attribution each source asks for. The Biber et al. (2023) turf-bounce data is used under CC BY 4.0.
 
-validation set. Local runs with those files check flight and impact against
+See [Contributing](CONTRIBUTING.md#validation-data-and-fixtures) for validation and fixture setup.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

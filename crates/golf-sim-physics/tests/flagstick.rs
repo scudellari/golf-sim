@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use golf_sim_base::{Real, Surface, Vec3, trace::NoProbe};
 use golf_sim_physics::{
     cup::{self, PuttFlagstick},
@@ -12,9 +10,8 @@ use golf_sim_physics::{
 use golf_sim_validate::Corpus;
 
 #[test]
-fn mygolfspy_putts_match_at_stimp_eight() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/validation");
-    let corpus = Corpus::load(path).unwrap();
+fn flagstick_putts_match_at_stimp_eight() {
+    let corpus = Corpus::load_default(None).unwrap();
     let bilder = corpus
         .files()
         .iter()

@@ -100,7 +100,6 @@ fn exact_golfer_matches_most_reference_scores() {
             })
         })
         .collect();
-    assert_eq!(expected.len(), 30);
 
     let mut actual = BTreeMap::new();
     for mode in ["caddie", "tour"] {
@@ -113,15 +112,15 @@ fn exact_golfer_matches_most_reference_scores() {
             assert!(actual.insert(id, strokes).is_none());
         }
     }
-    assert!(expected.keys().eq(actual.keys()));
-    let mismatches: Vec<_> = expected
+    assert_eq!(actual.len(), 30);
+    let mismatches: Vec<_> = actual
         .iter()
-        .filter_map(|(id, reference)| {
-            let played = actual[id];
-            (played != *reference).then(|| format!("{id}: batch {played}, reference {reference}"))
+        .filter_map(|(id, played)| {
+            let reference = expected[id];
+            (*played != reference).then(|| format!("{id}: batch {played}, reference {reference}"))
         })
         .collect();
-    let matches = expected.len() - mismatches.len();
+    let matches = actual.len() - mismatches.len();
     let report = format!(
         "{matches}/30 exact scores matched\n{}",
         mismatches.join("\n")

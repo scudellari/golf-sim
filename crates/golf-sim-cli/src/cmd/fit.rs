@@ -10,7 +10,7 @@ use golf_sim::{
         values::{ClubCategory, EndReason, EventKind, ShotEvent, units},
     },
 };
-use golf_sim_validate::{Conditions, Corpus, Kind, Role, Target};
+use golf_sim_validate::{Conditions, Corpus, Fit, Kind, Role, Target, TargetFile};
 
 use super::Outcome;
 use crate::validate_model::{self as model, DeliveryProbe, Inputs};
@@ -23,7 +23,7 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct FitArgs {
-    /// Read the validation corpus from DIR.
+    /// Read the public validation corpus from DIR.
     #[arg(long, global = true, value_name = "DIR")]
     data: Option<PathBuf>,
     #[command(subcommand)]
@@ -32,64 +32,46 @@ pub struct FitArgs {
 
 #[derive(Subcommand)]
 enum Job {
-    /// Fit club impact parameters to deliveries and face-map measurements.
+    /// Fit club impact parameters to measured deliveries and face-map measurements.
     Impact,
     /// Fit fairway resistance to the published driver run-out.
     Runout,
     /// Measure the calm launches used to check the Python flight solver.
     Parity,
+    #[command(hide = true)]
+    Launches,
 }
 
 pub fn run(Command::Fit(args): Command) -> Outcome {
-    let corpus = match args.data {
-        Some(path) => Corpus::load(path)?,
-        None => model::corpus()?,
-    };
-    let (dataset, required_files): (_, &[_]) = match args.job {
-        Job::Impact => ("local-launches", &["local/x1.json"]),
-        Job::Runout => ("local-runout", &["local/x10.json"]),
-        Job::Parity => (
-            "local-launches",
-            &[
-                "local/x1.json",
-                "local/x2.json",
-                "local/x4.json",
-                "local/x9.json",
-            ],
-        ),
-    };
-    if let Some(skipped) = corpus.skipped_datasets().iter().find(|entry| {
-        entry.dataset == dataset
-            && entry
-                .missing_files
-                .iter()
-                .any(|path| required_files.contains(&path.as_str()))
-    }) {
-        eprintln!("{skipped}");
-        if !matches!(args.job, Job::Parity) {
-            return Ok(());
-        }
-    }
+    let corpus = Corpus::load_default(args.data.as_deref())?;
     match args.job {
         Job::Impact => fit_impact(&corpus),
         Job::Runout => fit_runout(&corpus),
         Job::Parity => parity(&corpus),
+        Job::Launches => launch_inputs(&corpus),
     }
 }
 
 type Row<'a> = (&'a Target, &'a Conditions);
 
-fn rows<'a>(corpus: &'a Corpus, sources: &'a [&str], kind: Kind) -> impl Iterator<Item = Row<'a>> {
+fn rows(file: &TargetFile, kind: Kind) -> impl Iterator<Item = Row<'_>> {
+    file.targets
+        .iter()
+        .filter(move |target| target.kind == kind)
+        .map(|target| (target, &file.conditions))
+}
+
+fn fit_rows(corpus: &Corpus, role: Fit, kind: Kind) -> impl Iterator<Item = Row<'_>> {
     corpus
         .files()
         .iter()
-        .filter(move |file| sources.contains(&file.source.as_str()))
-        .flat_map(move |file| {
-            file.targets
-                .iter()
-                .filter(move |target| target.kind == kind)
-                .map(|target| (target, &file.conditions))
-        })
+        .filter(move |file| file.fits.contains(&role))
+        .flat_map(move |file| rows(file, kind))
+}
+
+fn skip(job: &str, role: Fit) -> Outcome {
+    println!("Skipped {job}. No targets with the {role} role.");
+    Ok(())
 }
 
 fn measurement(target: &Target, name: &str) -> Option<Real> {
@@ -101,14 +83,21 @@ fn measurement(target: &Target, name: &str) -> Option<Real> {
 }
 
 fn fit_impact(corpus: &Corpus) -> Outcome {
-    let tour: Vec<_> = rows(corpus, &["X1"], Kind::Delivery)
+    let deliveries: Vec<_> = fit_rows(corpus, Fit::Impact, Kind::Delivery)
         .filter(|(target, _)| target.role == Role::Fit)
         .collect();
-    let face: Vec<_> = rows(corpus, &["R47"], Kind::Delivery)
+    if deliveries.is_empty() {
+        return skip("IMPACT", Fit::Impact);
+    }
+    let face: Vec<_> = corpus
+        .files()
+        .iter()
+        .filter(|file| file.source == "R47")
+        .flat_map(|file| rows(file, Kind::Delivery))
         .filter(|(target, _)| measurement(target, "spin_rpm_change").is_some())
         .collect();
     let mut fits = BTreeMap::new();
-    for &(target, conditions) in &tour {
+    for &(target, conditions) in &deliveries {
         let input = Inputs(target);
         let Some(loft) = input.number("dynamic_loft_deg") else {
             continue;
@@ -122,7 +111,7 @@ fn fit_impact(corpus: &Corpus) -> Outcome {
                 [0.84, -0.35, 3500.0, 0.025],
                 [0.04, 0.08, 400.0, 0.015],
                 |p| {
-                    impact_error(club, p, &probe, loft, references, &face, &tour)
+                    impact_error(club, p, &probe, loft, references, &face, &deliveries)
                         .unwrap_or(Real::INFINITY)
                 },
             )
@@ -160,7 +149,7 @@ fn fit_impact(corpus: &Corpus) -> Outcome {
     }
 
     let [slope] = search([0.0], [0.004], |[slope]| {
-        iron_error(&tour, &fits, slope).unwrap_or(Real::INFINITY)
+        iron_error(&deliveries, &fits, slope).unwrap_or(Real::INFINITY)
     });
     let slope = snap(slope, 0.00001);
     for (club, (mut values, speed)) in fits {
@@ -188,7 +177,7 @@ fn impact_error(
     loft: Real,
     measured: [Option<Real>; 3],
     face: &[Row<'_>],
-    tour: &[Row<'_>],
+    deliveries: &[Row<'_>],
 ) -> Option<Real> {
     if !(0.5..=0.92).contains(&cor) || !(-0.7..=0.6).contains(&tangential) {
         return None;
@@ -238,7 +227,7 @@ fn impact_error(
         error += square((units::to_rpm(spot) - units::to_rpm(centre) - measured) / 240.0);
     }
     if club == ClubId::Driver {
-        for &(target, conditions) in tour {
+        for &(target, conditions) in deliveries {
             let input = Inputs(target);
             if input.club() != Some(club) || input.number("dynamic_loft_deg").is_some() {
                 continue;
@@ -254,7 +243,7 @@ fn impact_error(
 }
 
 fn iron_error(
-    tour: &[Row<'_>],
+    deliveries: &[Row<'_>],
     fits: &BTreeMap<ClubId, (Vec<Real>, Real)>,
     slope: Real,
 ) -> Option<Real> {
@@ -268,7 +257,7 @@ fn iron_error(
         spec.cor_speed_slope_delta = slope;
         spec.tangential_restitution_up = values[1];
         spec.tangential_restitution_toe = values[1];
-        for &(target, conditions) in tour {
+        for &(target, conditions) in deliveries {
             let input = Inputs(target);
             if input.club() != Some(club) || input.number("dynamic_loft_deg").is_some() {
                 continue;
@@ -323,7 +312,11 @@ fn snap(value: Real, step: Real) -> Real {
 }
 
 fn fit_runout(corpus: &Corpus) -> Outcome {
-    let rows: Vec<_> = rows(corpus, &["X10"], Kind::RunOut)
+    let mut candidates = fit_rows(corpus, Fit::Runout, Kind::RunOut).peekable();
+    if candidates.peek().is_none() {
+        return skip("RUNOUT", Fit::Runout);
+    }
+    let rows: Vec<_> = candidates
         .filter_map(|(target, conditions)| {
             Some((target, conditions, measurement(target, "run_yd")?))
         })
@@ -406,7 +399,10 @@ fn coast(start: &ShotEvent, stimp_m: Real, air: &roll::Air) -> Result<Real, &'st
 }
 
 fn parity(corpus: &Corpus) -> Outcome {
-    let mut launches: Vec<_> = rows(corpus, &["X1", "X2", "X4", "X9"], Kind::Launch).collect();
+    let mut launches: Vec<_> = fit_rows(corpus, Fit::Parity, Kind::Launch).collect();
+    if launches.is_empty() {
+        return skip("flight parity", Fit::Parity);
+    }
     launches.sort_by(|(left, _), (right, _)| left.id.cmp(&right.id));
     for (target, conditions) in launches {
         let inputs = Inputs(target);
@@ -423,6 +419,36 @@ fn parity(corpus: &Corpus) -> Outcome {
             landing.spin.length(),
         ];
         println!("FLIGHT {}", serde_json::to_string(&values)?);
+    }
+    Ok(())
+}
+
+fn launch_inputs(corpus: &Corpus) -> Outcome {
+    let launch_roles = [Fit::Aero, Fit::CarryGain, Fit::Parity];
+    for file in corpus.files() {
+        let roles: Vec<_> = file
+            .fits
+            .iter()
+            .filter(|role| launch_roles.contains(role))
+            .collect();
+        if roles.is_empty() {
+            continue;
+        }
+        let launches: Vec<_> = rows(file, Kind::Launch)
+            .map(|(target, _)| {
+                serde_json::json!({
+                    "id": target.id,
+                    "inputs": target.inputs,
+                    "measured": target.measured,
+                    "use": target.role,
+                    "held_out": target.held_out,
+                })
+            })
+            .collect();
+        if !launches.is_empty() {
+            let group = serde_json::json!({"fits": roles, "targets": launches});
+            println!("LAUNCHES {group}");
+        }
     }
     Ok(())
 }

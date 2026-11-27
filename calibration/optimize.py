@@ -1,4 +1,4 @@
-"""Small deterministic Nelder–Mead minimizer for the calibration scripts."""
+"""Small deterministic Nelder–Mead search for the calibration scripts."""
 
 
 def minimize(objective, start, steps, iterations=400):

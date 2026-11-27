@@ -31,13 +31,11 @@ cargo test --workspace --offline
 
 When `Cargo.lock` changes, run `just vendor` again.
 
-### Run validation with local data
+### Validation data and fixtures
 
-`cargo test --workspace --offline` runs the available targets and lists
-missing local datasets in the test output. Use `-- --nocapture` to see those
-lines on a passing run. For local tour-data checks and the full fit, place the
-files listed in the licence ledger under `testdata/validation/local/`.
-Keep that directory out of commits. See the [calibration guide](calibration/README.md).
+Extra validation data and reference cases can be supplied through `GOLF_SIM_LOCAL_DATA` or `testdata/local/`, each with its own ledger (`validation/targets/LICENCES.toml` and `fixtures/LICENCES.toml`), and are skipped when absent.
+
+Set `GOLF_SIM_LOCAL_DATA=` to run in public mode. For validation output from passing tests, use `cargo test --workspace --offline -- --nocapture`. See the [calibration guide](calibration/README.md).
 
 ## The determinism rules
 

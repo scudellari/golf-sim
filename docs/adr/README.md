@@ -9,7 +9,7 @@ An ADR records one decision that shapes the core. It says what was decided, why,
 | [0001](0001-every-decision-goes-through-one-apply.md) | Every decision goes through one `apply`, for people, agents and replays | Accepted, amended by 0005 | 2026-11-26 |
 | [0002](0002-one-pure-rust-maths-library-on-every-platform.md) | One pure-Rust maths library on every platform | Accepted, amended by 0004 | 2026-11-26 |
 | [0003](0003-godot-variant-bytes-for-courses-records-and-digests.md) | Godot Variant bytes for courses, records and digests | Accepted | 2026-11-26 |
-| [0004](0004-checked-against-measured-golf-not-the-earlier-implementation-s-bits.md) | Checked against measured golf, not against the earlier implementation's bits | Accepted, amended by 0007 | 2026-11-26 |
+| [0004](0004-checked-against-measured-golf-not-the-earlier-implementation-s-bits.md) | Checked against measured golf, not against the earlier implementation's bits | Accepted | 2026-11-26 |
 | [0005](0005-tests-and-agents-state-a-swing-or-use-a-seeded-profile.md) | Tests and agents state a swing exactly or use a seeded skill profile | Accepted | 2026-11-26 |
 | [0006](0006-every-result-can-be-replayed-and-explained.md) | Every result can be replayed and explained | Accepted | 2026-11-26 |
 

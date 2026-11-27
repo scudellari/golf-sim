@@ -4,6 +4,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use golf_sim_base::local_data;
 use serde::{Deserialize, Serialize};
 
 use crate::{Kind, Quantities, Quantity, Submodel, Target, TargetFile, target::named_enum};
@@ -17,12 +18,6 @@ named_enum!(Verdict {
     Local => "local",
     Excluded => "excluded",
 });
-
-impl Verdict {
-    fn optional(self) -> bool {
-        matches!(self, Self::Fetch | Self::Local)
-    }
-}
 
 #[derive(Debug, Deserialize)]
 pub struct Ledger {
@@ -38,8 +33,6 @@ pub struct Dataset {
     pub sources: Vec<String>,
     #[serde(default)]
     pub files: Vec<PathBuf>,
-    #[serde(default)]
-    pub local_files: Vec<PathBuf>,
     pub fetch: Option<Fetch>,
 }
 
@@ -102,112 +95,55 @@ impl Corpus {
     /// Load a validation directory containing `targets/LICENCES.toml`, with the
     /// layer tolerance table alongside the validation directory.
     pub fn load(validation_dir: impl AsRef<Path>) -> Result<Self, LoadError> {
-        let root = validation_dir.as_ref();
-        let ledger_path = root.join(LEDGER);
-        let ledger: Ledger = read_toml(&ledger_path)?;
-        check_format(&ledger_path, ledger.format)?;
-        let mut present = BTreeSet::new();
-        list_files(root, root, &mut present)?;
+        Self::load_with_local(validation_dir.as_ref(), None)
+    }
 
-        let mut registered = BTreeMap::<PathBuf, BTreeSet<&str>>::new();
-        let mut skipped = Vec::new();
-        let mut needs_rows = BTreeSet::new();
-        for (name, dataset) in &ledger.datasets {
-            let mut missing_files = Vec::new();
-            let mut has_present_files = false;
-            for (directory, files) in [
-                ("targets", &dataset.files),
-                ("local", &dataset.local_files),
-            ] {
-                for file in files {
-                    if file.as_os_str().is_empty()
-                        || !file
-                            .components()
-                            .all(|part| matches!(part, Component::Normal(_)))
-                    {
-                        return Err(LoadError::new(
-                            &ledger_path,
-                            format!("dataset {name:?} has invalid file path {}", file.display()),
-                        ));
-                    }
-                    let path = Path::new(directory).join(file);
-                    registered.entry(path.clone()).or_default().insert(name);
-                    if present.contains(&path) {
-                        has_present_files = true;
-                    } else if dataset.verdict != Verdict::Excluded {
-                        if !dataset.verdict.optional() {
-                            return Err(LoadError::new(
-                                &root.join(path),
-                                format!("file listed by dataset {name:?} is missing"),
-                            ));
-                        }
-                        missing_files.push(
-                            path.iter()
-                                .map(|part| part.to_string_lossy())
-                                .collect::<Vec<_>>()
-                                .join("/"),
-                        );
-                    }
+    /// Load the workspace corpus, with an optional override for the public directory.
+    pub fn load_default(validation_dir: Option<&Path>) -> Result<Self, LoadError> {
+        let testdata = local_data::workspace_testdata();
+        let local = local_data::resolve().map_err(|error| LoadError::new(&testdata, error))?;
+        Self::load_with_local(
+            validation_dir.unwrap_or(&testdata.join("validation")),
+            local.as_deref(),
+        )
+    }
+
+    pub fn load_with_local(public: &Path, local: Option<&Path>) -> Result<Self, LoadError> {
+        let (mut ledger, mut files, skipped) = read_directory(public, false)?;
+        if let Some(local) = local {
+            let root = local.join("validation");
+            let (local_ledger, local_files, _) = read_directory(&root, true)?;
+            for (name, dataset) in local_ledger.datasets {
+                if ledger.datasets.contains_key(&name) {
+                    return Err(LoadError::new(
+                        &root.join(LEDGER),
+                        format!("dataset {name:?} occurs in both ledgers"),
+                    ));
                 }
+                ledger.datasets.insert(name, dataset);
             }
-            let local_without_targets =
-                dataset.verdict == Verdict::Local && dataset.sources.is_empty();
-            if has_present_files && dataset.verdict != Verdict::Excluded && !local_without_targets
-            {
-                needs_rows.insert(name.as_str());
-            }
-            if dataset.verdict.optional() && (!has_present_files || !missing_files.is_empty()) {
-                missing_files.sort();
-                missing_files.dedup();
-                skipped.push(SkippedDataset {
-                    dataset: name.clone(),
-                    verdict: dataset.verdict,
-                    missing_files,
-                });
-            }
+            files.extend(local_files);
         }
 
-        let mut files = Vec::new();
         let mut ids = BTreeSet::new();
-        for path in present {
-            if path == Path::new(LEDGER) {
-                continue;
-            }
-            let full_path = root.join(&path);
-            let names = registered
-                .get(&path)
-                .ok_or_else(|| LoadError::new(&full_path, "file has no licence ledger entry"))?;
-            let active: BTreeSet<_> = names
-                .iter()
-                .copied()
-                .filter(|name| ledger.datasets[*name].verdict != Verdict::Excluded)
-                .collect();
-            if active.is_empty() || path.extension().is_none_or(|ext| ext != "json") {
-                continue;
-            }
-            let file = read_targets(&full_path, &ledger, &active)?;
+        for (path, file) in &files {
             for target in &file.targets {
-                if !ids.insert(target.id.clone()) {
+                if !ids.insert(&target.id) {
                     return Err(LoadError::new(
-                        &full_path,
+                        path,
                         format!("duplicate target id {:?}", target.id),
                     ));
                 }
             }
-            if !file.targets.is_empty() {
-                for name in active {
-                    needs_rows.remove(name);
-                }
+            if file.targets.iter().any(is_carry_gain) && file.carry_gain_baseline().is_none() {
+                return Err(LoadError::new(
+                    path,
+                    "carry gains require exactly one baseline launch",
+                ));
             }
-            files.push(file);
         }
-        if !needs_rows.is_empty() {
-            return Err(LoadError::new(
-                &ledger_path,
-                format!("datasets with files give no scorecard row: {needs_rows:?}"),
-            ));
-        }
-        let tolerance_path = root.with_file_name("tolerances.toml");
+        let files: Vec<_> = files.into_iter().map(|(_, file)| file).collect();
+        let tolerance_path = public.with_file_name("tolerances.toml");
         let layers: Layers = read_toml(&tolerance_path)?;
         layers.validate(&tolerance_path, &files)?;
         Ok(Self {
@@ -226,23 +162,137 @@ impl Corpus {
         &self.files
     }
 
-    /// Find the launch that the source uses as the baseline for carry gains.
-    pub fn carry_gain_baseline(&self, source: &str) -> Option<&Target> {
-        let mut baselines = self
-            .files()
+    pub fn carry_gain_baseline(&self, target: &Target) -> Option<&Target> {
+        if !is_carry_gain(target) {
+            return None;
+        }
+        self.files
             .iter()
-            .filter(|file| file.source == source)
-            .flat_map(|file| &file.targets)
-            .filter(|target| {
-                target.kind == Kind::Launch && !target.measured.contains_key("carry_gain_yd")
-            });
-        let baseline = baselines.next()?;
-        baselines.next().is_none().then_some(baseline)
+            .find(|file| file.targets.iter().any(|row| row.id == target.id))?
+            .carry_gain_baseline()
     }
 
     pub fn skipped_datasets(&self) -> &[SkippedDataset] {
         &self.skipped
     }
+}
+
+fn is_carry_gain(target: &Target) -> bool {
+    target.kind == Kind::Launch && target.measured.contains_key("carry_gain_yd")
+}
+
+type TargetFiles = Vec<(PathBuf, TargetFile)>;
+
+fn read_directory(
+    root: &Path,
+    local: bool,
+) -> Result<(Ledger, TargetFiles, Vec<SkippedDataset>), LoadError> {
+    let ledger_path = root.join(LEDGER);
+    let ledger: Ledger = read_toml(&ledger_path)?;
+    check_format(&ledger_path, ledger.format)?;
+    let mut present = BTreeSet::new();
+    list_files(root, root, &mut present)?;
+
+    let mut registered = BTreeMap::<PathBuf, BTreeSet<&str>>::new();
+    let mut skipped = Vec::new();
+    let mut needs_rows = BTreeSet::new();
+    for (name, dataset) in &ledger.datasets {
+        if (dataset.verdict == Verdict::Local) != local {
+            let requirement = if local {
+                "a local ledger requires the local verdict"
+            } else {
+                "a public ledger cannot use the local verdict"
+            };
+            return Err(LoadError::new(
+                &ledger_path,
+                format!("dataset {name:?}: {requirement}"),
+            ));
+        }
+
+        let mut missing_files = Vec::new();
+        let mut has_present_files = false;
+        for file in &dataset.files {
+            if file.as_os_str().is_empty()
+                || !file
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_)))
+            {
+                return Err(LoadError::new(
+                    &ledger_path,
+                    format!("dataset {name:?} has invalid file path {}", file.display()),
+                ));
+            }
+            let path = Path::new("targets").join(file);
+            registered.entry(path.clone()).or_default().insert(name);
+            if present.contains(&path) && (!local || root.join(&path).is_file()) {
+                has_present_files = true;
+            } else if dataset.verdict != Verdict::Excluded {
+                if dataset.verdict != Verdict::Fetch {
+                    return Err(LoadError::new(
+                        &root.join(path),
+                        format!("file listed by dataset {name:?} is missing"),
+                    ));
+                }
+                missing_files.push(
+                    path.iter()
+                        .map(|part| part.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                );
+            }
+        }
+
+        let needs_scorecard = match dataset.verdict {
+            Verdict::Local => !dataset.sources.is_empty(),
+            Verdict::Excluded => false,
+            _ => has_present_files,
+        };
+        if needs_scorecard {
+            needs_rows.insert(name.as_str());
+        }
+        if dataset.verdict == Verdict::Fetch && (!has_present_files || !missing_files.is_empty()) {
+            missing_files.sort();
+            missing_files.dedup();
+            skipped.push(SkippedDataset {
+                dataset: name.clone(),
+                verdict: dataset.verdict,
+                missing_files,
+            });
+        }
+    }
+
+    let mut files = Vec::new();
+    for path in present {
+        if path == Path::new(LEDGER) {
+            continue;
+        }
+        let full_path = root.join(&path);
+        let names = registered
+            .get(&path)
+            .ok_or_else(|| LoadError::new(&full_path, "file has no licence ledger entry"))?;
+        let active: BTreeSet<_> = names
+            .iter()
+            .copied()
+            .filter(|name| ledger.datasets[*name].verdict != Verdict::Excluded)
+            .collect();
+        if active.is_empty() || path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let file = read_targets(&full_path, &ledger, &active)?;
+        if !file.targets.is_empty() {
+            for name in active {
+                needs_rows.remove(name);
+            }
+        }
+        files.push((full_path, file));
+    }
+    if !needs_rows.is_empty() {
+        return Err(LoadError::new(
+            &ledger_path,
+            format!("datasets with files give no scorecard row: {needs_rows:?}"),
+        ));
+    }
+    Ok((ledger, files, skipped))
 }
 
 fn list_files(

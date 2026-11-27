@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use golf_sim_base::{
     Real, Surface, Vec3, fm,
     trace::{NoProbe, Phase, Trace},
@@ -194,8 +192,7 @@ impl Model for StrokeModel {
 
 #[test]
 fn measured_strokes() {
-    let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata");
-    let corpus = Corpus::load(testdata.join("validation")).unwrap();
+    let corpus = Corpus::load_default(None).unwrap();
     let mut report = corpus.run(&StrokeModel);
     let relevant = |submodel| {
         matches!(

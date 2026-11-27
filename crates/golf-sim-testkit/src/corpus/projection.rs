@@ -6,7 +6,9 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use golf_sim_base::variant::{self, Array, Dict, Variant};
+use golf_sim_base::variant::{Array, Dict, Variant};
+
+use crate::tolerance::Fixture;
 
 use super::Result;
 
@@ -26,10 +28,11 @@ pub(super) fn id(case: &Dict) -> &str {
 pub(super) struct Projection {
     dir: PathBuf,
     actual: Vec<Variant>,
+    header: Dict,
 }
 
 impl Projection {
-    pub(super) fn write(
+    pub(super) fn prepare(
         header: &Dict,
         testdata: &Path,
         tolerance_layer: Option<&str>,
@@ -40,6 +43,7 @@ impl Projection {
         let mut projection = Self {
             dir,
             actual: Vec::new(),
+            header: header.clone(),
         };
         fs::create_dir(projection.dir.join("testdata"))?;
         let mut cases = Vec::new();
@@ -58,16 +62,7 @@ impl Projection {
             cases.push(Variant::Dict(Dict::new(case)));
             projection.actual.push(actual);
         }
-        let mut fixture = header.clone();
-        *fixture.get_mut("cases").unwrap() = Variant::Array(Array::new(cases));
-        let body = variant::encode(&Variant::Dict(fixture))?;
-        let bytes = [
-            b"GSCORP01".as_slice(),
-            &u32::try_from(body.len())?.to_le_bytes(),
-            &body,
-        ]
-        .concat();
-        fs::write(projection.path(), bytes)?;
+        *projection.header.get_mut("cases").unwrap() = Variant::Array(Array::new(cases));
 
         let config = testdata.join("tolerances.toml");
         let limits = match fs::read_to_string(config) {
@@ -121,8 +116,8 @@ impl Projection {
         self.actual[index.value() as usize].clone()
     }
 
-    pub(super) fn path(&self) -> PathBuf {
-        self.dir.join("testdata/fixture.bin")
+    pub(super) fn fixture(&mut self) -> Fixture {
+        Fixture::from_header(std::mem::take(&mut self.header), self.dir.join("testdata"))
     }
 
     fn scratch_dir() -> Result<PathBuf> {

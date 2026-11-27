@@ -10,9 +10,21 @@ pub struct TargetFile {
     pub url: String,
     pub datasets: Vec<String>,
     pub verdict: crate::Verdict,
+    #[serde(default)]
+    pub fits: Vec<Fit>,
     pub conditions: Conditions,
     #[serde(deserialize_with = "read_targets")]
     pub targets: Vec<Target>,
+}
+
+impl TargetFile {
+    pub(crate) fn carry_gain_baseline(&self) -> Option<&Target> {
+        let mut baselines = self.targets.iter().filter(|target| {
+            target.kind == Kind::Launch && !target.measured.contains_key("carry_gain_yd")
+        });
+        let baseline = baselines.next()?;
+        baselines.next().is_none().then_some(baseline)
+    }
 }
 
 fn read_targets<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<Target>, D::Error> {
@@ -50,9 +62,16 @@ pub struct Conditions {
 
 impl Conditions {
     /// The carry at which the source measures a club's lateral bend.
-    pub fn curve_reference_carry(&self, target: &Target) -> Option<f64> {
+    fn curve_reference_carry(&self, target: &Target) -> Option<f64> {
         let club = target.inputs.get("club")?.as_str()?;
         self.curve_reference_carry_yd.get(club).copied()
+    }
+
+    pub fn normalize_curve(&self, target: &Target, curve_yd: f64, carry_yd: f64) -> f64 {
+        self.curve_reference_carry(target)
+            .map_or(curve_yd, |reference| {
+                curve_yd * reference / carry_yd.max(1.0)
+            })
     }
 }
 
@@ -187,6 +206,14 @@ macro_rules! named_enum {
 }
 
 pub(crate) use named_enum;
+
+named_enum!(Fit {
+    Impact => "impact",
+    Aero => "aero",
+    CarryGain => "carry-gain",
+    Parity => "parity",
+    Runout => "runout",
+});
 
 named_enum!(Kind {
     Launch => "launch",

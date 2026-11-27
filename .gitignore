@@ -3,5 +3,4 @@ target/
 /.cargo/config.toml
 Cargo.lock.bak
 .DS_Store
-# Validation targets kept out of the repository by the licence ledger.
-/testdata/validation/local/
+/testdata/local

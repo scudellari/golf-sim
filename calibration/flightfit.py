@@ -20,7 +20,7 @@ DRAG_SCALE = 0.5 * RHO * math.pi * RADIUS**2 / MASS
 GRAVITY = 9.80665
 
 LAUNCH_KEYS = ("ball_mph", "launch_deg", "spin_rpm")
-TOUR_METRICS = ("carry_yd", "apex_yd", "descent_deg")
+AERO_METRICS = ("carry_yd", "apex_yd", "descent_deg")
 COEFFICIENTS = ("CD_BASE", "CD_SPIN", "CD_SPIN2", "CD_CRISIS_RISE", "CL_SCALE", "CL_EXPONENT")
 
 
@@ -74,12 +74,12 @@ def fly(ball_mph, launch_degrees, rpm, coefficients, dt=1/60):
         vx, vy = next_vx, next_vy
 
 
-def objective(coefficients, tour, gain_rows, baseline):
+def objective(coefficients, launches, gain_groups):
     bounds = [(0.14, 0.29), (0.15, 0.85), (-0.75, -0.15), (0.10, 0.40), (0.40, 0.65), (0.30, 0.75)]
     if any(not lo <= value <= hi for value, (lo, hi) in zip(coefficients, bounds)):
         return 1e6
     carry_error = height_error = angle_error = 0.0
-    for row in tour:
+    for row in launches:
         carry, apex, angle, _ = fly(*launch(row), coefficients)
         measured = fit_measurements(row)
         if "carry_yd" in measured:
@@ -88,22 +88,36 @@ def objective(coefficients, tour, gain_rows, baseline):
             height_error += (100.0 * (apex / measured["apex_yd"] - 1.0))**2
         if "descent_deg" in measured:
             angle_error += (angle - measured["descent_deg"])**2
-    origin = fly(*launch(baseline), coefficients)[0]
-    gain_error = sum((fly(*launch(row), coefficients)[0] - origin
-                      - fit_measurements(row)["carry_gain_yd"])**2 for row in gain_rows)
-    return (carry_error + 0.3 * height_error + 0.5 * angle_error) / len(tour) + gain_error / len(gain_rows)
+    gain_errors = []
+    for baseline, gains in gain_groups:
+        origin = fly(*launch(baseline), coefficients)[0]
+        gain_errors.extend((fly(*launch(row), coefficients)[0] - origin
+                            - fit_measurements(row)["carry_gain_yd"])**2 for row in gains)
+    return ((carry_error + 0.3 * height_error + 0.5 * angle_error) / len(launches)
+            + (sum(gain_errors) / len(gain_errors) if gain_errors else 0.0))
 
 
-def fit(targets):
-    tour = [row for row in targets.rows(("X1", "X2"), "launch")
-            if set(TOUR_METRICS).intersection(fit_measurements(row))]
-    gain_rows = targets.rows(("X4",), "launch")
-    [baseline] = [row for row in gain_rows if "carry_gain_yd" not in row["measured"]]
-    gains = [row for row in gain_rows if "carry_gain_yd" in fit_measurements(row)]
-    if not tour or not gains or not fit_measurements(baseline):
-        raise ValueError("Flight fit requires launch rows and carry gains")
+def fit(groups):
+    launches = sorted((row for group in groups if "aero" in group["fits"]
+                       for row in group["targets"] if set(AERO_METRICS).intersection(fit_measurements(row))),
+                      key=lambda row: row["id"])
+    if not launches:
+        raise ValueError("Flight fit requires measured launch rows")
+
+    gain_groups = []
+    for group in groups:
+        if "carry-gain" not in group["fits"]:
+            continue
+        rows = group["targets"]
+        [baseline] = [row for row in rows if "carry_gain_yd" not in row["measured"]]
+        gains = sorted((row for row in rows if "carry_gain_yd" in fit_measurements(row)),
+                       key=lambda row: row["id"])
+        if not gains or not fit_measurements(baseline):
+            raise ValueError("Carry-gain fit requires fit measurements for gains and their baseline")
+        gain_groups.append((baseline, gains))
+
     start = [0.1831, 0.5959, -0.4992, 0.2589, 0.5099, 0.4526]
-    best = minimize(lambda coefficients: objective(coefficients, tour, gains, baseline),
+    best = minimize(lambda coefficients: objective(coefficients, launches, gain_groups),
                     start, [0.008, 0.045, 0.045, 0.035, 0.03, 0.03], 240)
     best = [round(value, 5) for value in best]
     output = dict(zip(COEFFICIENTS, best))

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Validation and reference fixtures.** One local data folder supplies validation targets with the `local` verdict and extra fixture cases. Target files declare their fit roles.
 
 ## 0.2.1 (2026-11-27)
 

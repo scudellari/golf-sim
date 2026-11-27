@@ -30,24 +30,9 @@ use golf_sim_validate::{
 
 const FORWARD: Vec3 = Vec3::new(0.0, 0.0, -1.0);
 
-pub fn corpus() -> Result<Corpus, LoadError> {
-    let relative = Path::new("testdata/validation");
-    if relative.is_dir() {
-        Corpus::load(relative)
-    } else {
-        Corpus::load(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join(relative),
-        )
-    }
-}
-
-pub fn report() -> Result<Report, LoadError> {
-    let corpus = corpus()?;
-    Ok(corpus.run(&Simulation {
-        gain_baseline: corpus.carry_gain_baseline("X4"),
-    }))
+pub fn report(data: Option<&Path>) -> Result<Report, LoadError> {
+    let corpus = Corpus::load_default(data)?;
+    Ok(corpus.run(&Simulation { corpus: &corpus }))
 }
 
 pub fn failures(report: &Report) -> impl Iterator<Item = String> + '_ {
@@ -67,7 +52,7 @@ pub fn failures(report: &Report) -> impl Iterator<Item = String> + '_ {
 type OperandMagnitudes = BTreeMap<String, Real>;
 
 struct Simulation<'a> {
-    gain_baseline: Option<&'a Target>,
+    corpus: &'a Corpus,
 }
 
 impl Model for Simulation<'_> {
@@ -101,7 +86,11 @@ impl Model for Simulation<'_> {
                     ("run_yd", units::to_yards(shot.run_m())),
                 ]);
                 if target.measured.contains_key("carry_gain_yd") {
-                    let baseline = launch_shot(Inputs(self.gain_baseline?), &air, &ground)?;
+                    let baseline = launch_shot(
+                        Inputs(self.corpus.carry_gain_baseline(target)?),
+                        &air,
+                        &ground,
+                    )?;
                     difference(
                         &mut predictions,
                         &mut operands,
@@ -613,12 +602,8 @@ fn delivery(
             let curve = units::to_yards(
                 shot.carry_side_m() - carry * fm::tan(launch.readout.launch_direction_rad),
             );
-            // The curvature source reports bend normalized to its published carry.
-            let source_carry = conditions.curve_reference_carry(inputs.0)?;
-            predictions.extend(numbers([(
-                "curve_yd",
-                curve * source_carry / carry_yd.max(1.0),
-            )]));
+            let curve = conditions.normalize_curve(inputs.0, curve, carry_yd);
+            predictions.extend(numbers([("curve_yd", curve)]));
         }
         if measured.contains_key("true_roll_in") {
             let position = shot.first_event(EventKind::PureRoll)?.position;
@@ -678,7 +663,7 @@ mod tests {
 
     #[test]
     fn measured_targets_pass() {
-        let report = report().unwrap();
+        let report = report(None).unwrap();
         assert!(!report.targets.is_empty());
         for dataset in &report.skipped_datasets {
             println!("{dataset}");
@@ -689,7 +674,7 @@ mod tests {
 
     #[test]
     fn spin_report_held_out_angles_are_within_scatter() {
-        let report = report().unwrap();
+        let report = report(None).unwrap();
         let (fit, held_out): (Vec<_>, Vec<_>) = report
             .targets
             .iter()

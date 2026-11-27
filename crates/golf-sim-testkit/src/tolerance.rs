@@ -186,10 +186,11 @@ impl Fixture {
             .find(|parent| parent.file_name().is_some_and(|name| name == "testdata"))
             .unwrap_or_else(|| Path::new("testdata"))
             .to_path_buf();
-        Ok(Self {
-            fields: fixture,
-            testdata,
-        })
+        Ok(Self::from_header(fixture, testdata))
+    }
+
+    pub(crate) fn from_header(fields: Dict, testdata: PathBuf) -> Self {
+        Self { fields, testdata }
     }
 
     pub fn layer(&self) -> &str {
@@ -903,35 +904,44 @@ impl StdError for CheckFailure {}
 pub fn check<E: fmt::Display>(
     path: &Path,
     layer: &str,
-    mut run: impl FnMut(&Dict) -> Result<Variant, E>,
+    run: impl FnMut(&Dict) -> Result<Variant, E>,
 ) -> CorpusResult<CheckReport> {
-    let fixture = Fixture::read(path)?;
-    fixture.require_layer(layer)?;
-    let config = fixture.testdata.join(TOLERANCES);
-    let limits = Layer::load(&config, fixture.key(), layer)?
-        .ok_or_else(|| format!("{}: no tolerances for layer {layer:?}", config.display()))?;
-    let (cases, skipped) = fixture.selected_cases()?;
-    let checked = cases.len();
-    let mut discrete = Vec::new();
-    for case in cases {
-        let expected = case.expected()?;
-        let actual = case.run(&mut run)?;
-        let allow_discrete =
-            (discrete.len() + 1) as Real / checked as Real <= limits.discrete_share;
-        discrete.extend(compare_case(
-            &case,
-            &expected,
-            &actual,
-            &limits,
-            allow_discrete,
-            &skipped,
-        )?);
+    Fixture::read(path)?.check(layer, run)
+}
+
+impl Fixture {
+    pub(crate) fn check<E: fmt::Display>(
+        &self,
+        layer: &str,
+        mut run: impl FnMut(&Dict) -> Result<Variant, E>,
+    ) -> CorpusResult<CheckReport> {
+        self.require_layer(layer)?;
+        let config = self.testdata.join(TOLERANCES);
+        let limits = Layer::load(&config, self.key(), layer)?
+            .ok_or_else(|| format!("{}: no tolerances for layer {layer:?}", config.display()))?;
+        let (cases, skipped) = self.selected_cases()?;
+        let checked = cases.len();
+        let mut discrete = Vec::new();
+        for case in cases {
+            let expected = case.expected()?;
+            let actual = case.run(&mut run)?;
+            let allow_discrete =
+                (discrete.len() + 1) as Real / checked as Real <= limits.discrete_share;
+            discrete.extend(compare_case(
+                &case,
+                &expected,
+                &actual,
+                &limits,
+                allow_discrete,
+                &skipped,
+            )?);
+        }
+        Ok(CheckReport {
+            checked,
+            discrete,
+            skipped,
+        })
     }
-    Ok(CheckReport {
-        checked,
-        discrete,
-        skipped,
-    })
 }
 
 #[derive(Clone, Debug, PartialEq)]

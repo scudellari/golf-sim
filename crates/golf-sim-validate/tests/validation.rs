@@ -7,7 +7,7 @@ use std::{
 
 use golf_sim_validate::{
     Conditions, Corpus, Kind, Model, Quantities, Quantity, Report, Role, Scorecard, ScorecardDiff,
-    Status, Submodel, Target, TargetFile, Verdict,
+    Status, Submodel, Target, Verdict,
 };
 use serde_json::{Value, json};
 
@@ -21,35 +21,11 @@ fn earlier(target: &Target, _: &Conditions) -> Option<Quantities> {
 
 #[test]
 fn committed_corpus_loads_reports_and_scores() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/validation");
-    let corpus = Corpus::load(&root).unwrap();
-    let files: BTreeSet<_> = corpus
-        .ledger()
-        .datasets
-        .values()
-        .filter(|dataset| dataset.verdict != Verdict::Excluded)
-        .flat_map(|dataset| {
-            dataset
-                .files
-                .iter()
-                .map(|path| root.join("targets").join(path))
-                .chain(
-                    dataset
-                        .local_files
-                        .iter()
-                        .map(|path| root.join("local").join(path)),
-                )
-        })
-        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "json"))
-        .collect();
-    assert_eq!(corpus.files().len(), files.len());
-    let targets: Vec<_> = files
-        .into_iter()
-        .flat_map(|path| {
-            serde_json::from_slice::<TargetFile>(&fs::read(path).unwrap())
-                .unwrap()
-                .targets
-        })
+    let corpus = Corpus::load_default(None).unwrap();
+    let targets: Vec<_> = corpus
+        .files()
+        .iter()
+        .flat_map(|file| &file.targets)
         .collect();
     assert!(!targets.is_empty());
     let checked = targets
@@ -72,21 +48,11 @@ fn committed_corpus_loads_reports_and_scores() {
     );
     assert_eq!(count(&report, Status::Failed), 0);
     assert_eq!(count(&report, Status::NotRun), 0);
-    let sample_club = if report
-        .skipped_datasets
-        .iter()
-        .any(|dataset| dataset.dataset == "local-deliveries")
-    {
-        "lw"
-    } else {
-        "driver"
-    };
-    let sample_prefix =
-        format!("PING\t{sample_club}\tdelivery\tPING.{sample_club}.face-share\tface_share\t");
+    let sample_prefix = "PING\tlw\tdelivery\tPING.lw.face-share\tface_share\t";
     let text = report.to_string();
     let sample = text
         .lines()
-        .find(|line| line.starts_with(&sample_prefix))
+        .find(|line| line.starts_with(sample_prefix))
         .unwrap();
     assert!(sample.ends_with("\t0\tpass"), "{sample}");
     let json = serde_json::to_string(&report).unwrap();
@@ -201,38 +167,35 @@ fn unlisted_nested_data_fails_the_ledger_check() {
 
 #[test]
 fn a_dataset_with_data_but_no_targets_fails_the_ledger_check() {
-    for (verdict, sources, directory, files) in [
-        ("commit", "[]", "targets", "files"),
-        ("cite", "[]", "targets", "files"),
-        ("fetch", "[]", "targets", "files"),
-        ("local", "['P']", "local", "local_files"),
-    ] {
+    for verdict in ["commit", "cite", "fetch"] {
         let fixture = Fixture::new(&format!(
-            "[datasets.planted]\nverdict = '{verdict}'\nsources = {sources}\n{files} = ['raw.csv']"
+            "[datasets.planted]\nverdict = '{verdict}'\nfiles = ['raw.csv']"
         ));
-        fixture.write(&format!("validation/{directory}/raw.csv"), "data");
+        fixture.write("validation/targets/raw.csv", "data");
         let error = fixture.load().unwrap_err().to_string();
         assert!(
             error.contains("datasets with files give no scorecard row: {\"planted\"}"),
             "{verdict}: {error}"
         );
     }
+
+    let fixture = Fixture::new("");
+    fixture.local_ledger(
+        "[datasets.planted]\nverdict = 'local'\nsources = ['A']\nfiles = ['raw.csv']",
+    );
+    fixture.write("local/validation/targets/raw.csv", "data");
+    assert!(
+        fixture
+            .load_with_local()
+            .unwrap_err()
+            .message
+            .contains("no scorecard row")
+    );
 }
 
 #[test]
 fn local_fit_inputs_without_sources_need_no_scorecard_row() {
-    let fixture = Fixture::new(
-        "
-[datasets.planted]
-verdict = 'cite'
-sources = ['A']
-files = ['a.json']
-[datasets.fit-inputs]
-verdict = 'local'
-sources = []
-local_files = ['raw/data.csv', 'raw/SOURCE.txt']
-",
-    );
+    let fixture = Fixture::new("[datasets.planted]\nverdict = 'cite'\nfiles = ['a.json']");
     fixture.targets(
         "targets/a.json",
         "A",
@@ -240,28 +203,98 @@ local_files = ['raw/data.csv', 'raw/SOURCE.txt']
         "cite",
         vec![target("A.first")],
     );
-    let without = fixture.load().unwrap().run(&measured).scorecard();
-    assert_eq!(without.skipped_datasets.len(), 1);
-    assert_eq!(without.skipped_datasets[0].dataset, "fit-inputs");
+    fixture.local_ledger("[datasets.fit-inputs]\nverdict = 'local'\nfiles = ['raw/data.csv']");
+    fixture.write("local/validation/targets/raw/data.csv", "data");
 
-    fixture.write("validation/local/raw/data.csv", "data");
-    fixture.write("validation/local/raw/SOURCE.txt", "provenance");
-    let with = fixture.load().unwrap().run(&measured).scorecard();
-    assert!(with.skipped_datasets.is_empty());
-    assert_eq!(with.rows, without.rows);
-    assert_eq!(with.submodels, without.submodels);
+    let without = fixture.load().unwrap().run(&measured).scorecard();
+    let with = fixture
+        .load_with_local()
+        .unwrap()
+        .run(&measured)
+        .scorecard();
+    assert_eq!(with, without);
 }
 
 #[test]
-fn absent_fetch_and_local_are_listed_and_excluded_data_is_unread() {
+fn local_ledger_rejects_missing_unlisted_and_conflicting_data() {
+    let fixture = Fixture::new("[datasets.public]\nverdict = 'excluded'");
+    for (entry, expected) in [
+        (
+            "[datasets.probe]\nverdict = 'local'\nfiles = ['missing.csv']",
+            "is missing",
+        ),
+        (
+            "[datasets.public]\nverdict = 'local'",
+            "occurs in both ledgers",
+        ),
+        (
+            "[datasets.probe]\nverdict = 'cite'",
+            "requires the local verdict",
+        ),
+    ] {
+        fixture.local_ledger(entry);
+        let error = fixture.load_with_local().unwrap_err();
+        assert!(error.message.contains(expected), "{error}");
+    }
+
+    fixture.local_ledger("");
+    fixture.write("local/validation/targets/unlisted.csv", "data");
+    let error = fixture.load_with_local().unwrap_err();
+    assert!(error.path.ends_with("unlisted.csv"));
+    assert_eq!(error.message, "file has no licence ledger entry");
+
+    let fixture = Fixture::new("[datasets.probe]\nverdict = 'local'");
+    assert!(
+        fixture
+            .load()
+            .unwrap_err()
+            .message
+            .contains("cannot use the local verdict")
+    );
+}
+
+#[test]
+fn launch_gains_use_a_baseline_from_the_same_file() {
+    let fixture = Fixture::new("[datasets.public]\nverdict = 'cite'\nfiles = ['a.json', 'b.json']");
+    let mut first_gain = target("gain-a");
+    first_gain["measured"]["carry_gain_yd"] = json!(3.0);
+    let mut second_gain = target("gain-b");
+    second_gain["measured"]["carry_gain_yd"] = json!(5.0);
+    fixture.targets(
+        "targets/a.json",
+        "A",
+        "public",
+        "cite",
+        vec![first_gain, target("base-a")],
+    );
+    fixture.targets(
+        "targets/b.json",
+        "A",
+        "public",
+        "cite",
+        vec![second_gain.clone(), target("base-b")],
+    );
+    let corpus = fixture.load().unwrap();
+    for (file, id) in corpus.files().iter().zip(["base-a", "base-b"]) {
+        assert_eq!(corpus.carry_gain_baseline(&file.targets[0]).unwrap().id, id);
+    }
+    fixture.targets("targets/b.json", "A", "public", "cite", vec![second_gain]);
+    assert!(
+        fixture
+            .load()
+            .unwrap_err()
+            .message
+            .contains("exactly one baseline")
+    );
+}
+
+#[test]
+fn absent_fetch_is_listed_and_excluded_data_is_unread() {
     let fixture = Fixture::new(
         "
 [datasets.remote]
 verdict = 'fetch'
 fetch = { url = 'https://example.test/data.csv', step = 'Download to a local cache' }
-[datasets.local]
-verdict = 'local'
-local_files = ['present.json', 'absent.json']
 [datasets.unused]
 verdict = 'excluded'
 files = ['excluded.json']
@@ -271,33 +304,14 @@ files = ['excluded.json']
         "validation/targets/excluded.json",
         "excluded data is unread",
     );
-    fixture.targets(
-        "local/present.json",
-        "P",
-        "local",
-        "local",
-        vec![target("P.present")],
-    );
     let corpus = fixture.load().unwrap();
     let report = corpus.run(&measured);
-    assert_eq!(count(&report, Status::Passed), 1);
-    assert_eq!(report.skipped_datasets.len(), 2);
-    let local = &report.skipped_datasets[0];
-    assert_eq!(local.dataset, "local");
-    assert_eq!(local.verdict, Verdict::Local);
-    assert_eq!(local.missing_files, ["local/absent.json"]);
-    let fetch = &report.skipped_datasets[1];
+    assert!(report.targets.is_empty());
+    let [fetch] = report.skipped_datasets.as_slice() else {
+        panic!("expected one absent dataset");
+    };
     assert_eq!(fetch.dataset, "remote");
     assert_eq!(fetch.verdict, Verdict::Fetch);
-    let row = &report.scorecard().rows[0];
-    assert_eq!(row.scores.datasets["local"], Verdict::Local);
-    for line in report
-        .to_string()
-        .lines()
-        .filter(|line| line.starts_with("skipped"))
-    {
-        println!("{line}");
-    }
     assert!(
         report
             .to_string()
@@ -548,6 +562,17 @@ impl Fixture {
             }
         });
         self.write(&format!("validation/{path}"), &file.to_string());
+    }
+
+    fn local_ledger(&self, datasets: &str) {
+        self.write(
+            "local/validation/targets/LICENCES.toml",
+            &format!("format = 1\n{datasets}"),
+        );
+    }
+
+    fn load_with_local(&self) -> Result<Corpus, golf_sim_validate::LoadError> {
+        Corpus::load_with_local(&self.0.join("validation"), Some(&self.0.join("local")))
     }
 
     fn load(&self) -> Result<Corpus, golf_sim_validate::LoadError> {

@@ -6,6 +6,7 @@ pub mod corpus;
 pub mod digest;
 pub mod fm;
 pub mod geometry;
+pub mod local_data;
 pub mod log;
 pub mod num;
 pub mod seed;

@@ -72,8 +72,8 @@ fn exact_swings_match_recorded_power_and_timing() {
     })
     .unwrap_or_else(|error| panic!("{error}"));
 
-    assert_eq!(golfer_cases, 56);
-    assert_eq!(off_centre, 33);
+    assert!(golfer_cases >= 56);
+    assert!(off_centre >= 33);
     assert!(report.skipped.is_empty(), "{report}");
     assert!(report.discrete.is_empty(), "{report}");
     println!("{golfer_cases} exact swings matched recorded power and timing");

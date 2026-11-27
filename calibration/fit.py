@@ -20,8 +20,6 @@ from greenfit import fit as fit_green
 from targets import ROOT, Targets
 
 TUNABLES = Path("crates/golf-sim-physics/src/tunables.rs")
-LOCAL_LAUNCHES = "local-launches"
-RUNOUT = "local-runout"
 CARGO = ("cargo", "run", "--offline", "--release", "-p", "golf-sim-cli", "--")
 CLUBS = dict(zip(
     ("driver", "3wood", "hybrid", "4iron", "5iron", "6iron", "7iron", "8iron", "9iron", "pw"),
@@ -30,15 +28,24 @@ CLUBS = dict(zip(
 PARITY_TOLERANCES = (0.12, 0.07, 0.06, 0.6)
 
 
-def invoke(command, targets, root, job):
+def invoke(command, targets, job, manifest=None):
     env = os.environ.copy()
     target_dir = ROOT / "target"
-    env["CARGO_TARGET_DIR"] = str(target_dir if root == ROOT else target_dir / "calibration")
+    env["CARGO_TARGET_DIR"] = str(target_dir if manifest is None else target_dir / "calibration")
+    if manifest is not None:
+        command = (*command[:-1], "--manifest-path", str(manifest), "--")
     result = subprocess.run(
-        [*command, "fit", job, "--data", str(targets.directory)], env=env, cwd=root,
+        [*command, "fit", job, "--data", str(targets.directory)], env=env, cwd=ROOT,
         check=True, stdout=subprocess.PIPE, text=True,
     )
     return result.stdout.splitlines()
+
+
+def available(lines):
+    if len(lines) == 1 and lines[0].startswith("Skipped "):
+        print(lines[0], flush=True)
+        return False
+    return True
 
 
 def records(lines, prefix):
@@ -95,26 +102,17 @@ def checked_aero(text):
     return [float(values[name]) for name in COEFFICIENTS]
 
 
-def can_fit(targets, name, dataset, *files):
-    missing = [file for file in targets.missing_local_files(dataset) if file in files]
-    if missing:
-        print(f"Skipped {name}. Missing dataset {dataset} ({', '.join(missing)}).", flush=True)
-    return not missing
-
-
-def runout_block(command, targets, root, text):
-    [stimp] = records(invoke(command, targets, root, "runout"), "RUNOUT ")
+def runout_block(text, lines):
+    [stimp] = records(lines, "RUNOUT ")
     return replace_block(text, "RUNOUT", format_constants({"FAIRWAY_STIMP_M": stimp}))
 
 
-def check_parity(command, targets, root, text):
-    launch_files = ("x1.json", "x2.json", "x4.json", "x9.json")
-    missing = targets.missing_local_files(LOCAL_LAUNCHES)
-    if all(file in missing for file in launch_files):
-        can_fit(targets, "flight parity", LOCAL_LAUNCHES, *launch_files)
+def check_parity(lines, groups, text):
+    rows = sorted((row for group in groups if "parity" in group["fits"]
+                   for row in group["targets"]), key=lambda row: row["id"])
+    if not available(lines) and not rows:
         return
-    rows = targets.rows(("X1", "X2", "X4", "X9"), "launch")
-    actual = records(invoke(command, targets, root, "parity"), "FLIGHT ")
+    actual = records(lines, "FLIGHT ")
     if not rows or len(actual) != len(rows):
         raise ValueError(f"Rust returned {len(actual)} flight rows, expected {len(rows)}")
     coefficients = checked_aero(text)
@@ -147,13 +145,17 @@ def main():
         targets = Targets(scratch)
         candidate = original
         reproduced = []
-        has_impact = can_fit(targets, "IMPACT", LOCAL_LAUNCHES, "x1.json")
+        impact_lines = invoke(command, targets, "impact")
+        has_impact = available(impact_lines)
         if has_impact:
-            impact = impact_block(original, invoke(command, targets, ROOT, "impact"))
+            impact = impact_block(original, impact_lines)
             candidate = replace_block(candidate, "IMPACT", impact)
-        if can_fit(targets, "AERO", LOCAL_LAUNCHES, "x1.json", "x2.json", "x4.json"):
-            candidate = replace_block(candidate, "AERO", format_constants(fit_flight(targets)))
+        launch_groups = records(invoke(command, targets, "launches"), "LAUNCHES ")
+        if any("aero" in group["fits"] for group in launch_groups):
+            candidate = replace_block(candidate, "AERO", format_constants(fit_flight(launch_groups)))
             reproduced.append("AERO")
+        else:
+            print("Skipped AERO. No targets with the aero role.", flush=True)
         if has_impact:
             reproduced.append("IMPACT")
         bounce = fit_bounce(targets)
@@ -163,10 +165,11 @@ def main():
         )))
         reproduced.extend(("BOUNCE", "GREEN BOUNCE"))
 
-        has_runout = can_fit(targets, "RUNOUT", RUNOUT, "x10.json")
+        runout_lines = invoke(command, targets, "runout")
+        has_runout = available(runout_lines)
         generated = candidate
         if has_runout:
-            generated = runout_block(command, targets, ROOT, candidate)
+            generated = runout_block(candidate, runout_lines)
             reproduced.append("RUNOUT")
         if generated != original and not args.write:
             show_diff(original, generated)
@@ -176,17 +179,23 @@ def main():
             # Bounce and flight affect the run-out solve. Build the candidate away from
             # the working tree so a failed build or parity check leaves the tunables intact.
             staged = scratch / "candidate"
-            shutil.copytree(ROOT, staged, ignore=shutil.ignore_patterns(".git", "target", "local"))
+            def ignored(directory, names):
+                if Path(directory) == ROOT / "testdata":
+                    return {"local"}.intersection(names)
+                return {".git", "target"}.intersection(names)
+
+            shutil.copytree(ROOT, staged, ignore=ignored)
+            manifest = staged / "Cargo.toml"
             staged_tunables = staged / TUNABLES
             staged_tunables.write_text(candidate, encoding="utf-8")
             if has_runout:
-                generated = runout_block(CARGO, targets, staged, candidate)
-            check_parity(CARGO, targets, staged, generated)
+                generated = runout_block(candidate, invoke(CARGO, targets, "runout", manifest))
+            check_parity(invoke(CARGO, targets, "parity", manifest), launch_groups, generated)
             show_diff(original, generated)
             tunables.write_text(generated, encoding="utf-8")
             print("Calibration blocks updated.")
         else:
-            check_parity(command, targets, ROOT, original)
+            check_parity(invoke(command, targets, "parity"), launch_groups, original)
             print(f"Reproduced {', '.join(reproduced[:-1])} and {reproduced[-1]}.")
     return 0
 

@@ -45,6 +45,121 @@ fn text(bytes: &[u8]) -> &str {
 }
 
 #[test]
+fn local_fixture_cases_reconstruct_the_unsplit_fixture() {
+    let work = TempDir::new();
+    let public = work.0.join("public.bin");
+    let unsplit = work.0.join("unsplit.bin");
+    let local = work.0.join("local");
+    let fixtures = local.join("fixtures");
+    let extra = fixtures.join("variant/digests/fixture.bin");
+    let ledger = fixtures.join("LICENCES.toml");
+    fs::create_dir_all(extra.parent().unwrap()).unwrap();
+    let write_ledger = |entries| {
+        fs::write(
+            &ledger,
+            format!("format = 1\ntests = ['example']\n{entries}"),
+        )
+        .unwrap();
+    };
+    let listed = "[fixtures.\"variant/digests\"]\ncases = 2";
+    write_ledger(listed);
+    let case = |id, value| snapshot(id, value, value, false);
+    write_fixture(&public, &snapshots(vec![case("z", 4.0), case("A", 1.0)]));
+    let extras = snapshots(vec![case("é", 8.0), case("a", 2.0)]);
+    write_fixture(&extra, &extras);
+    write_fixture(
+        &unsplit,
+        &snapshots(vec![
+            case("A", 1.0),
+            case("a", 2.0),
+            case("z", 4.0),
+            case("é", 8.0),
+        ]),
+    );
+
+    let read = || corpus::read_with_local(&public, Some(&local));
+    assert_eq!(
+        read().unwrap(),
+        corpus::read_with_local(&unsplit, None).unwrap()
+    );
+
+    let check = |root: &Path| {
+        Command::new(golf_binary())
+            .env("GOLF_SIM_LOCAL_DATA", root)
+            .args(["corpus", "check"])
+            .arg(&public)
+            .output()
+            .unwrap()
+    };
+    for (root, expected) in [
+        (local.as_path(), "checked 4 cases\n"),
+        (Path::new(""), "checked 2 cases\n"),
+    ] {
+        let output = check(root);
+        assert!(output.status.success(), "{}", text(&output.stderr));
+        assert_eq!(text(&output.stdout), expected);
+    }
+    let output = check(&local.join("missing"));
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("GOLF_SIM_LOCAL_DATA"));
+
+    for (field, value, expected) in [
+        ("format", 2_i64.into(), "unknown corpus fixture version"),
+        (
+            "layer",
+            "variant/other".into(),
+            "fixture header differs in layer",
+        ),
+        (
+            "oracle",
+            object([
+                ("versions", object([])),
+                ("commit", "changed".into()),
+                ("hash", "example".into()),
+            ]),
+            "fixture header differs in oracle",
+        ),
+    ] {
+        let mut invalid = extras.as_dict().unwrap().clone();
+        *invalid.get_mut(field).unwrap() = value;
+        write_fixture(&extra, &Variant::Dict(invalid));
+        let error = read().unwrap_err().to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+
+    write_fixture(&extra, &snapshots(vec![case("z", 4.0), case("a", 2.0)]));
+    assert!(
+        read()
+            .unwrap_err()
+            .to_string()
+            .contains("occurs in both fixtures")
+    );
+    write_fixture(&extra, &extras);
+    write_ledger("[fixtures.\"variant/digests\"]\ncases = 1");
+    assert!(
+        read()
+            .unwrap_err()
+            .to_string()
+            .contains("fixture has 2 cases, ledger lists 1")
+    );
+    write_ledger("");
+    assert!(
+        read()
+            .unwrap_err()
+            .to_string()
+            .contains("no fixture ledger entry")
+    );
+    write_ledger(listed);
+    fs::remove_file(&extra).unwrap();
+    assert!(
+        read()
+            .unwrap_err()
+            .to_string()
+            .contains("fixture ledger is missing")
+    );
+}
+
+#[test]
 fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
     let golf = golf_binary();
     let work = TempDir::new();
@@ -52,6 +167,7 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
     let invoke = |action: &str, path: &Path, layer: Option<&str>| {
         let mut command = Command::new(golf);
         command
+            .env("GOLF_SIM_LOCAL_DATA", "")
             .current_dir(&work.0)
             .args(["corpus", action])
             .arg(path);
@@ -72,7 +188,7 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
         print!("{expected}");
     };
 
-    let Variant::Dict(mut original) = corpus::read(&fixture).unwrap() else {
+    let Variant::Dict(mut original) = corpus::read_with_local(&fixture, None).unwrap() else {
         panic!("expected corpus dictionary");
     };
     let Some(Variant::Array(cases)) = original.get_mut("cases") else {
@@ -178,6 +294,7 @@ fn golf_checks_corpus_tolerances_and_reports_drift_and_departures() {
     fs::create_dir(&cwd).unwrap();
     fails(
         Command::new(golf)
+            .env("GOLF_SIM_LOCAL_DATA", "")
             .current_dir(cwd)
             .args(["corpus", "check"])
             .arg(nested)
@@ -344,7 +461,8 @@ fn golf_names_the_first_different_stroke_in_a_record() {
         .unwrap();
     }
 
-    let Variant::Dict(mut records) = corpus::read(&data.join("records/holes/fixture.bin")).unwrap()
+    let Variant::Dict(mut records) =
+        corpus::read_with_local(&data.join("records/holes/fixture.bin"), None).unwrap()
     else {
         panic!("expected records fixture");
     };
@@ -363,7 +481,7 @@ fn golf_names_the_first_different_stroke_in_a_record() {
     write_fixture(&record_path, &Variant::Dict(records));
 
     let Variant::Dict(mut transitions) =
-        corpus::read(&data.join("rules/transitions/fixture.bin")).unwrap()
+        corpus::read_with_local(&data.join("rules/transitions/fixture.bin"), None).unwrap()
     else {
         panic!("expected transitions fixture");
     };
@@ -402,6 +520,7 @@ fn golf_names_the_first_different_stroke_in_a_record() {
 
     let invoke = |action: &str| {
         Command::new(golf_binary())
+            .env("GOLF_SIM_LOCAL_DATA", "")
             .current_dir(&work.0)
             .args(["corpus", action])
             .arg(&record_path)
@@ -426,6 +545,9 @@ fn fixture_paths(root: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for entry in fs::read_dir(root).unwrap() {
         let entry = entry.unwrap();
+        if root.ends_with("testdata") && entry.file_name() == "local" {
+            continue;
+        }
         if entry.file_type().unwrap().is_dir() {
             paths.extend(fixture_paths(&entry.path()));
         } else if entry.file_name() == "fixture.bin" {
@@ -450,7 +572,8 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
         )
         .unwrap();
     }
-    let Variant::Dict(mut header) = corpus::read(&root.join("course/grids/fixture.bin")).unwrap()
+    let Variant::Dict(mut header) =
+        corpus::read_with_local(&root.join("course/grids/fixture.bin"), None).unwrap()
     else {
         panic!("expected fixture header");
     };
@@ -464,6 +587,7 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
     let golf = golf_binary();
     for (action, dir) in [("check", &parent), ("drift", &bundle)] {
         let output = Command::new(golf)
+            .env("GOLF_SIM_LOCAL_DATA", "")
             .current_dir(&work.0)
             .args(["corpus", action])
             .arg(&path)
@@ -491,6 +615,7 @@ fn golf_resolves_course_id_and_revision_from_explicit_directories() {
     write_fixture(&path, &Variant::Dict(header));
     for action in ["check", "drift"] {
         let output = Command::new(golf)
+            .env("GOLF_SIM_LOCAL_DATA", "")
             .current_dir(&work.0)
             .args(["corpus", action])
             .arg(&path)

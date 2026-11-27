@@ -162,7 +162,7 @@ pub(in crate::corpus) fn project(
                 if let Some((reference, calculated)) = replay_cart_path(case, &owner.legal(), paths)
                 {
                     dependent += 1;
-                    let combine = |plain, extra| {
+                    let join_fields = |plain, extra| {
                         if positional {
                             object([(
                                 "position",
@@ -175,8 +175,8 @@ pub(in crate::corpus) fn project(
                             object([("recorded_outline", plain), ("computed_outline", extra)])
                         }
                     };
-                    expected = combine(expected, reference);
-                    actual = combine(actual, calculated);
+                    expected = join_fields(expected, reference);
+                    actual = join_fields(actual, calculated);
                     break;
                 }
             }

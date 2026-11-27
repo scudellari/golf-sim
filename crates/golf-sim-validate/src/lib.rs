@@ -12,6 +12,6 @@ pub use score::{
     ScorecardRow, SubmodelChange, SubmodelScore,
 };
 pub use target::{
-    Check, Conditions, Earlier, EarlierVia, Green, Ground, Kind, Quantities, Quantity, Role,
+    Check, Conditions, Earlier, EarlierVia, Fit, Green, Ground, Kind, Quantities, Quantity, Role,
     Submodel, Target, TargetFile, Tolerance, ToleranceKind,
 };

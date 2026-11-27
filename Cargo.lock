@@ -390,6 +390,7 @@ dependencies = [
 name = "golf-sim-validate"
 version = "0.2.1"
 dependencies = [
+ "golf-sim-base",
  "serde",
  "serde_json",
  "toml",

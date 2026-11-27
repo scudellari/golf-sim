@@ -1,16 +1,182 @@
 //! Oracle fixtures and first differences between Variant values.
 
-use std::{fmt, fmt::Write, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    fmt::Write,
+    fs, io,
+    path::{Component, Path, PathBuf},
+};
 
-use crate::{Error, Real, variant::Variant};
+use serde::Deserialize;
+
+use crate::{
+    Error, Real, local_data,
+    variant::{Dict, Variant},
+};
 
 const MAGIC: &[u8; 8] = b"GSCORP01";
 
 pub fn read(path: &Path) -> Result<Variant, Error> {
-    let bytes = fs::read(path).map_err(|error| Error::Io {
+    let local = local_data::resolve().map_err(|error| io_error(path, error))?;
+    read_with_local(path, local.as_deref())
+}
+
+pub fn read_with_local(path: &Path, local: Option<&Path>) -> Result<Variant, Error> {
+    let mut public = read_file(path)?;
+    let Some(root) = local.map(|root| root.join("fixtures")) else {
+        return Ok(public);
+    };
+    match fs::metadata(&root) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(public),
+        Err(error) => return Err(io_error(&root, error)),
+        Ok(_) => {}
+    }
+    let ledger_path = root.join("LICENCES.toml");
+    let text = fs::read_to_string(&ledger_path).map_err(|error| io_error(&ledger_path, error))?;
+    let ledger: FixtureLedger =
+        toml::from_str(&text).map_err(|error| fixture_error(&ledger_path, error.to_string()))?;
+    if ledger.format != 1 {
+        return Err(fixture_error(
+            &ledger_path,
+            format!("unknown format {}", ledger.format),
+        ));
+    }
+    let mut listed = BTreeSet::new();
+    for key in ledger.fixtures.keys() {
+        if !key.split('/').all(|part| {
+            let mut components = Path::new(part).components();
+            !part.contains('\\')
+                && matches!(
+                    (components.next(), components.next()),
+                    (Some(Component::Normal(_)), None)
+                )
+        }) {
+            return Err(fixture_error(
+                &ledger_path,
+                format!("invalid fixture key {key:?}"),
+            ));
+        }
+        let file = root.join(key).join("fixture.bin");
+        if !file.is_file() {
+            return Err(fixture_error(
+                &file,
+                "file listed in the fixture ledger is missing",
+            ));
+        }
+        listed.insert(file);
+    }
+    check_fixture_inventory(&root, &listed)?;
+
+    let Variant::Dict(header) = &mut public else {
+        unreachable!("validated fixture header");
+    };
+    let key = header.get("layer").and_then(Variant::as_str).unwrap();
+    if let Some(entry) = ledger.fixtures.get(key) {
+        append_cases(header, &root.join(key).join("fixture.bin"), entry.cases)?;
+    }
+    Ok(public)
+}
+
+#[derive(Deserialize)]
+struct FixtureLedger {
+    format: u32,
+    #[serde(default)]
+    fixtures: BTreeMap<String, FixtureEntry>,
+}
+
+#[derive(Deserialize)]
+struct FixtureEntry {
+    cases: usize,
+}
+
+fn check_fixture_inventory(directory: &Path, listed: &BTreeSet<PathBuf>) -> Result<(), Error> {
+    for entry in fs::read_dir(directory).map_err(|error| io_error(directory, error))? {
+        let entry = entry.map_err(|error| io_error(directory, error))?;
+        let path = entry.path();
+        if entry
+            .file_type()
+            .map_err(|error| io_error(&path, error))?
+            .is_dir()
+        {
+            check_fixture_inventory(&path, listed)?;
+        } else if entry.file_name() == "fixture.bin" && !listed.contains(&path) {
+            return Err(fixture_error(&path, "file has no fixture ledger entry"));
+        }
+    }
+    Ok(())
+}
+
+fn append_cases(public: &mut Dict, path: &Path, count: usize) -> Result<(), Error> {
+    let Variant::Dict(mut local) =
+        read_file(path).map_err(|error| fixture_error(path, error.to_string()))?
+    else {
+        unreachable!("validated fixture header");
+    };
+    for field in ["format", "layer", "oracle"] {
+        if first_difference(public.get(field).unwrap(), local.get(field).unwrap()).is_some() {
+            return Err(fixture_error(
+                path,
+                format!("fixture header differs in {field}"),
+            ));
+        }
+    }
+    let local_cases = fixture_cases(&mut local);
+    if local_cases.len() != count {
+        return Err(fixture_error(
+            path,
+            format!(
+                "fixture has {} cases, ledger lists {count}",
+                local_cases.len()
+            ),
+        ));
+    }
+    let public_cases = fixture_cases(public);
+    let public_ids: BTreeSet<_> = public_cases.iter().map(case_id).collect();
+    for id in local_cases.iter().map(case_id) {
+        if public_ids.contains(id) {
+            return Err(fixture_error(
+                path,
+                format!("case id {id:?} occurs in both fixtures"),
+            ));
+        }
+    }
+    public_cases.append(local_cases);
+    public_cases.sort_by(|left, right| case_id(left).cmp(case_id(right)));
+    Ok(())
+}
+
+fn fixture_cases(header: &mut Dict) -> &mut Vec<Variant> {
+    let Some(Variant::Array(cases)) = header.get_mut("cases") else {
+        unreachable!("validated fixture cases");
+    };
+    &mut cases.items
+}
+
+fn case_id(case: &Variant) -> &str {
+    case.as_dict()
+        .unwrap()
+        .get("id")
+        .and_then(Variant::as_str)
+        .unwrap()
+}
+
+fn fixture_error(path: &Path, message: impl Into<String>) -> Error {
+    Error::Malformed {
+        path: path.display().to_string(),
+        message: message.into(),
+    }
+}
+
+fn io_error(path: &Path, error: io::Error) -> Error {
+    Error::Io {
         file: path.display().to_string(),
         message: error.to_string(),
-    })?;
+    }
+}
+
+fn read_file(path: &Path) -> Result<Variant, Error> {
+    let bytes = fs::read(path).map_err(|error| io_error(path, error))?;
     decode(&bytes)
 }
 

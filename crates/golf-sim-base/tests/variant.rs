@@ -194,8 +194,6 @@ fn comparer_names_the_first_edited_value_and_applies_per_path_tolerances() {
 
 #[test]
 fn corpus_rejects_invalid_size_and_case_id() {
-    let bytes = include_bytes!("../../../testdata/variant/digests/fixture.bin");
-    assert!(corpus::decode(&bytes[..bytes.len() - 1]).is_err());
     let fixture = dict([
         ("format", 1_i64.into()),
         ("layer", "example".into()),
@@ -216,6 +214,7 @@ fn corpus_rejects_invalid_size_and_case_id() {
     let mut bytes = b"GSCORP01".to_vec();
     bytes.extend(u32::try_from(payload.len()).unwrap().to_le_bytes());
     bytes.extend(payload);
+    assert!(corpus::decode(&bytes[..bytes.len() - 1]).is_err());
     assert!(matches!(
         corpus::decode(&bytes),
         Err(Error::WrongType { path, .. }) if path == "cases[0].id"

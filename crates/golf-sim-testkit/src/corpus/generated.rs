@@ -11,12 +11,7 @@ use super::{Result, Runner, child};
 pub(super) struct WithDepartures(PathBuf);
 
 impl WithDepartures {
-    pub(super) fn prepare(
-        fixture: &Path,
-        testdata: &Path,
-        runner: Runner,
-        header: &Dict,
-    ) -> Result<Option<Self>> {
+    pub(super) fn prepare(testdata: &Path, runner: Runner, header: &Dict) -> Result<Option<Self>> {
         if !matches!(runner, Runner::PhysicsFacade | Runner::PhysicsStrokes) {
             return Ok(None);
         }
@@ -50,7 +45,7 @@ impl WithDepartures {
         }
 
         let scratch = Self::new()?;
-        let dir = scratch.0.join("testdata");
+        let dir = scratch.testdata();
         fs::create_dir(&dir)?;
         let limits = testdata.join("tolerances.toml");
         match fs::copy(limits, dir.join("tolerances.toml")) {
@@ -74,7 +69,6 @@ impl WithDepartures {
             )?;
         }
         fs::write(dir.join("departures.toml"), departures)?;
-        fs::copy(fixture, scratch.fixture())?;
         Ok(Some(scratch))
     }
 
@@ -91,8 +85,8 @@ impl WithDepartures {
         }
     }
 
-    pub(super) fn fixture(&self) -> PathBuf {
-        self.0.join("testdata/fixture.bin")
+    pub(super) fn testdata(&self) -> PathBuf {
+        self.0.join("testdata")
     }
 }
 

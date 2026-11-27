@@ -22,10 +22,13 @@ pub struct ValidateArgs {
     /// Write JSON to stdout or to FILE.
     #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "-")]
     json: Option<PathBuf>,
+    /// Read the public validation corpus from DIR.
+    #[arg(long, value_name = "DIR")]
+    data: Option<PathBuf>,
 }
 
 pub fn run(Command::Validate(args): Command) -> Outcome {
-    let report = validate_model::report()?;
+    let report = validate_model::report(args.data.as_deref())?;
     print_report(&report, args.json.as_deref())?;
     let failures = validate_model::failures(&report).count();
     if failures != 0 {

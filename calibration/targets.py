@@ -57,16 +57,8 @@ class Targets:
             return
         for name in data.get("files", ()):
             path = self.directory / "targets" / name
-            if path.is_file() or data["verdict"] not in {"fetch", "local"}:
+            if path.is_file() or data["verdict"] != "fetch":
                 yield path
-        for name in data.get("local_files", ()):
-            path = self.directory / "local" / name
-            if path.is_file():
-                yield path
-
-    def missing_local_files(self, dataset):
-        return [name for name in self.datasets[dataset]["local_files"]
-                if not (self.directory / "local" / name).is_file()]
 
     def rows(self, sources, kind):
         files = {path for name, data in self.datasets.items()

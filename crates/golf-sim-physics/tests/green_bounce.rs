@@ -31,10 +31,7 @@ fn contact(speed: Real, degrees: Real, spin: Real, firmness: Real, class: GreenC
 
 #[test]
 fn stiffer_r04_greens_rebound_faster_and_shallower_with_more_spin_change() {
-    let corpus = Corpus::load(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/validation"),
-    )
-    .unwrap();
+    let corpus = Corpus::load_default(None).unwrap();
     let targets = &corpus
         .files()
         .iter()

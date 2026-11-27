@@ -148,7 +148,7 @@ The crates follow the dependency order of the domain, so the compiler enforces w
 
 | Crate | Owns | Depends on |
 | --- | --- | --- |
-| `golf-sim-base` | `fm` (every transcendental), engine-order vectors, plane geometry, seeds, the Variant codec, the bundle container, digests, the stroke trace, the log's span names | nothing |
+| `golf-sim-base` | `fm` (every transcendental), engine-order vectors, plane geometry, seeds, the Variant codec, the bundle container, digests, the stroke trace, the log's span names, the workspace data resolver | nothing |
 | `golf-sim-physics` | Flight, bounce, roll, the cup, obstacles, the strike, tunables, the sampler traits, the plane ground, constant air, the zone map | base |
 | `golf-sim-course` | The course bundle reader, grids, materials, regions, obstacles, the legal map, `ray_hit` | base, physics |
 | `golf-sim-conditions` | The world, the samplers, wear, lies, the round plan, the generator, course analysis | base, physics, course |
@@ -156,7 +156,7 @@ The crates follow the dependency order of the domain, so the compiler enforces w
 | `golf-sim-stroke` | The bag, the address, the delivery, a stroke, a preview, a drop | base, physics, course, conditions, swing |
 | `golf-sim-rules` | The hole's rules state, rulings, relief | base, physics, course, stroke |
 | `golf-sim` | `Hole`, `Round`, `Action`, records, observation, the console, the range | every crate above |
-| `golf-sim-validate` | The measured-data targets, the licence ledger and the residual report | nothing |
+| `golf-sim-validate` | The measured-data targets, the licence ledger and the residual report | base |
 | `golf-sim-cli` | The `golf` program, repro bundles, `explain`, sweeps and scenarios | golf-sim, golf-sim-validate, golf-sim-testkit (for `golf corpus`) |
 | `golf-sim-godot` | The Godot binding, a `cdylib` | golf-sim |
 | `golf-sim-testkit` | The determinism suite, the tolerance comparisons, the fixture loaders and the earlier implementation's record decoders, for tests only | golf-sim |
@@ -248,15 +248,18 @@ The core is checked three ways, and each answers a different question. [ADR 0004
 
 The acceptance standard for the physics is published measurement. Each physics unit is done when its targets pass.
 
-| Layer | Public targets | Local targets |
-| --- | --- | --- |
-| Turf bounce | Biber et al. (2023), 693 natural-turf trials, Haake (1989) high-backspin impacts, and USGA and R&A landing measurements | |
-| Cup | Hogan and Antali, Penner's capture on a slope, and Bilder's flagstick trials | |
-| The stroke | Stock carry against USGA and R&A launch-condition data | |
+| Layer | Public targets |
+| --- | --- |
+| Flight | Lyu and Li aerodynamic coefficients |
+| Impact | The R&A robot face map, Wood et al. on lob-wedge start direction, and bunker and putter measurements |
+| Turf bounce | Biber et al. (2023), 693 natural-turf trials, Haake (1989) high-backspin impacts, and USGA and R&A landing measurements |
+| Run-out and greens | Stimpmeter exit speed and Brede's slope formula |
+| Cup | Hogan and Antali, Penner's capture on a slope, and Bilder's flagstick trials |
+| The stroke | Stock carry against USGA and R&A launch-condition data |
 
 A target holds the inputs (a launch, a club delivery, an impact on turf, a run-out, a stimp reading), the measured values, the source's own tolerance where it states one, and the earlier implementation's residual. A target passes when the core is within the source's tolerance, or no further from the measurement than the earlier implementation was, plus the layer's tolerance. So the port can never make a residual worse, and a model that closes a known gap shows it.
 
-The suite lists and skips missing `fetch` and `local` datasets. `golf validate` prints the prediction, measurement and residual for each available target. Use `--json` to save a report for comparison. Committed targets live in `testdata/validation/targets/` and local targets live in the ignored `testdata/validation/local/`. Each file names its source.
+The suite lists and skips missing `fetch` datasets. `golf validate` prints the prediction, measurement and residual for each available target. Use `--json` to save a report for comparison. Committed targets live in `testdata/validation/targets/`. Each file names its source. See [Contributing](../../CONTRIBUTING.md#validation-data-and-fixtures) for validation and fixture setup.
 
 **The licence ledger.** `testdata/validation/targets/LICENCES.toml` lists every dataset with its terms and how the core uses it. A test fails when a data file has no entry.
 
@@ -264,7 +267,7 @@ The suite lists and skips missing `fetch` and `local` datasets. `golf validate` 
 - The ledger marks committed figures from sources such as the USGA and R&A reports as `cite`.
 - A `fetch` entry names an optional download that calibration can stage locally.
 
-**Calibration.** `calibration/fit.py` and its helpers fit the marked blocks of the tunables (`BEGIN FIT` to `END FIT` in `tunables.rs`) to the targets. `golf fit impact`, `golf fit runout` and `golf fit parity` give the script the model's outputs. The full run reproduces every committed block. The public run checks the two bounce blocks and names the datasets needed for the skipped fits and flight parity.
+**Calibration.** `calibration/fit.py` and its helpers fit the marked blocks of the tunables (`BEGIN FIT` to `END FIT` in `tunables.rs`) to the targets. `golf fit impact`, `golf fit runout` and `golf fit parity` give the script the model's outputs. A target file can declare a `fits` array with `impact`, `aero`, `carry-gain`, `parity` or `runout`. Those roles select inputs by target kind. A file with launch carry gains supplies one launch without a gain as its baseline. See the [calibration guide](../../calibration/README.md) for the public run.
 
 ### The earlier implementation, within a tolerance
 
@@ -310,7 +313,7 @@ The core may correct a known residual, such as the short iron carries or the lif
 
 New data and new models arrive the same way. A new source is a target file and a ledger entry. A new model of a phase, such as a different lift curve or a turf model with speed-dependent resistance, sits behind the same physics facade, and the residual report decides whether it replaces the current one.
 
-**The scorecard.** Every target names its sub-model (flight, impact, turf bounce, run-out and greens, the cup, the stroke) and its role: `fit` targets calibrate the model and `held-out` targets only score it. A scorecard row is a source, a sub-model and a role, with the licence verdict from the ledger, the tolerance and the residuals. A target with neither a tolerance nor an earlier prediction is reported and never failed, and a `local` dataset is skipped when absent, like a `fetch` one. A sub-model's score is the mean of its rows' residuals as a share of their tolerances, given separately for fit and held-out rows. `golf score` prints it, and the calibration fits only `fit` rows.
+**The scorecard.** Every target names its sub-model (flight, impact, turf bounce, run-out and greens, the cup, the stroke) and its role: `fit` targets calibrate the model and `held-out` targets only score it. A scorecard row is a source, a sub-model and a role, with the licence verdict from the ledger, the tolerance and the residuals. A target with neither a tolerance nor an earlier prediction is reported and never failed. A sub-model's score is the mean of its rows' residuals as a share of their tolerances, given separately for fit and held-out rows. `golf score` prints it, and the calibration fits only `fit` rows.
 
 The first model changes of this kind are planned as units: the flagstick's rim response, cup capture on slopes, green bounce across the iron range, and lift capped near a spin ratio of 0.3. Each lands after the layer it changes has been ported and after the scorecard, and they land one after another because they share the tunables and the departures. Once a change lands, every later comparison with the earlier implementation carries its departures, so a later layer lists the cases the change moved rather than failing on them.
 
