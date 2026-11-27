@@ -190,11 +190,15 @@ impl FixtureRun {
                 Ok::<_, std::convert::Infallible>(projected.actual(case))
             });
         }
+        let prepared = self.primary_course(&header);
+        let prepared = prepared
+            .as_deref()
+            .map(|course| PreparedCourse::new(course, self.runner));
         let fixture = self.comparison(header);
         let layer = self.layer.clone();
         let report = fixture.check_cases(&layer, |case| {
             observe(case);
-            self.run(case, false)
+            self.run(case, false, prepared.as_ref())
         });
         if self.runner == Runner::CourseQueries {
             let bounds = self.query_checks.finish();
@@ -214,9 +218,13 @@ impl FixtureRun {
                 Ok::<_, std::convert::Infallible>(projected.actual(case))
             });
         }
+        let prepared = self.primary_course(&header);
+        let prepared = prepared
+            .as_deref()
+            .map(|course| PreparedCourse::new(course, self.runner));
         let fixture = self.comparison(header);
         let layer = self.layer.clone();
-        let report = fixture.drift_cases(&layer, |case| self.run(case, true));
+        let report = fixture.drift_cases(&layer, |case| self.run(case, true, prepared.as_ref()));
         if self.runner == Runner::CourseQueries {
             let _ = self.query_checks.finish();
         }
@@ -300,7 +308,23 @@ impl FixtureRun {
             .ok_or_else(|| missing_course(identity).into())
     }
 
-    fn run(&mut self, case: &Dict, drift: bool) -> Result<CaseOutcome> {
+    fn primary_course(&mut self, header: &Dict) -> Option<Arc<Course>> {
+        if !matches!(self.runner, Runner::CourseQueries) {
+            return None;
+        }
+        let identity = self
+            .header_course
+            .as_ref()
+            .or_else(|| projection::rows(header).find_map(course_identity))?;
+        self.courses.open(identity).ok().flatten()
+    }
+
+    fn run(
+        &mut self,
+        case: &Dict,
+        drift: bool,
+        prepared: Option<&PreparedCourse<'_>>,
+    ) -> Result<CaseOutcome> {
         if let Some(reason) = self.unsupported_sampler(case) {
             return Ok(CaseOutcome::Refused(reason));
         }
@@ -327,18 +351,25 @@ impl FixtureRun {
             None
         };
         let course = resolved.as_deref();
+        let prepared = prepared
+            .filter(|prepared| course.is_some_and(|course| std::ptr::eq(course, prepared.course)));
 
         Ok(match self.runner {
             Runner::Variant => tolerance::variant_snapshot(case)?,
             Runner::CourseGrids => {
                 course::grids(course.ok_or("fixture has no course identity")?, case)?
             }
-            Runner::CourseQueries => course::queries(
-                course.ok_or("fixture has no course identity")?,
-                case,
-                &mut self.query_checks,
-                drift,
-            )?,
+            Runner::CourseQueries => {
+                let course = course.ok_or("fixture has no course identity")?;
+                let fallback;
+                let queries = if let Some(queries) = prepared.and_then(|p| p.queries.as_ref()) {
+                    queries
+                } else {
+                    fallback = course::Queries::new(course);
+                    &fallback
+                };
+                course::queries(queries, case, &mut self.query_checks, drift)?
+            }
             Runner::PhysicsValues => {
                 return self
                     .tunable_departures
@@ -408,6 +439,20 @@ impl FixtureRun {
             }
         }
         None
+    }
+}
+
+struct PreparedCourse<'a> {
+    course: &'a Course,
+    queries: Option<course::Queries<'a>>,
+}
+
+impl<'a> PreparedCourse<'a> {
+    fn new(course: &'a Course, runner: Runner) -> Self {
+        Self {
+            course,
+            queries: (runner == Runner::CourseQueries).then(|| course::Queries::new(course)),
+        }
     }
 }
 
