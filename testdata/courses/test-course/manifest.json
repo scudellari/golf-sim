@@ -2,7 +2,7 @@
 	"format": "links-lab-course",
 	"format_version": 1,
 	"bake_version": "0.6.0",
-	"baker_hash": "dea9d2b6e8d433d51b051c77e977734d1546685153fa1c1be812ee243f47e2ac",
+	"baker_hash": "78d08ae333741175ff3f783829001084b9ccdf6cc847a2341dbbd11584a6db50",
 	"source_hash": "1d7a0396235a2083914a5e506863547c52c1b73236dd10609b35cf2648d7ef2b",
 	"course_id": "test-course",
 	"course_revision": "82b40c2b1d877f0d5a28c48efdd2179e79e4be3ef664b69ec0f7b2e3569072eb",
