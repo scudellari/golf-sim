@@ -22,8 +22,7 @@ const BUILD_VERSIONS: [(&str, &str); 5] = [
     ("commit", GOLF_SIM_COMMIT),
     ("physics", golf_sim_physics::tunables::VERSION),
     ("tuning", golf_sim_stroke::tuning::VERSION),
-    // The rules crate does not expose a model version yet.
-    ("rules", "unversioned"),
+    ("rules", golf_sim_rules::VERSION),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]

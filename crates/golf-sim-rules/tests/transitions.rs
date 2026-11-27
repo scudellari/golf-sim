@@ -1,13 +1,9 @@
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::BTreeSet, path::Path};
 
 use golf_sim_base::{
-    PromptKind, Real, Surface, Vec2, Vec3, corpus,
+    PromptKind, Real, Surface, Vec2, Vec3,
     digest::object,
+    trace::NoProbe,
     variant::{self, Array, Components, Dict, FloatWidth, Variant},
 };
 use golf_sim_course::{
@@ -15,13 +11,14 @@ use golf_sim_course::{
     legal::Area,
 };
 use golf_sim_rules::{
+    relief::{self, AbnormalCondition, AbnormalKind},
     rulings::{
         Consequence, HoleRules, PenaltyAreaValue, ReliefArea, ReliefOption, RulesRefusal,
         RulesStep, Ruling, Status,
     },
     transitions,
 };
-use golf_sim_stroke::results::{End, StrokeOutcome};
+use golf_sim_stroke::results::{DropResult, End, StrokeOutcome};
 use golf_sim_testkit::tolerance;
 
 const RULES_CALLS: [&str; 8] = [
@@ -50,66 +47,40 @@ const RELIEF_CALLS: [&str; 9] = [
 #[test]
 fn transitions_match_reference() {
     let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata");
-    let Variant::Dict(mut fixture) =
-        corpus::read(&testdata.join("rules/transitions/fixture.bin")).unwrap()
-    else {
-        unreachable!();
-    };
-    let Variant::Array(rows) = fixture.get_mut("cases").unwrap() else {
-        unreachable!();
-    };
-    assert_eq!(rows.items.len(), 585);
+    let path = testdata.join("rules/transitions/fixture.bin");
     let mut calls = BTreeSet::new();
-    let mut relief_calls = BTreeSet::new();
-    rows.items.retain(|row| {
-        let call = dict(row).get("call").unwrap().as_str().unwrap();
-        if let Some(&call) = RULES_CALLS.iter().find(|&&name| name == call) {
-            calls.insert(call);
-            true
-        } else {
-            assert!(RELIEF_CALLS.contains(&call), "unexpected call {call}");
-            relief_calls.insert(
-                RELIEF_CALLS
-                    .iter()
-                    .copied()
-                    .find(|&name| name == call)
-                    .unwrap(),
-            );
-            false
-        }
-    });
-    assert_eq!(calls, BTreeSet::from(RULES_CALLS));
-    assert_eq!(relief_calls, BTreeSet::from(RELIEF_CALLS));
-    assert_eq!(rows.items.len(), 502);
-
-    // The comparison API takes a corpus path, so project the assigned calls into a scratch fixture.
-    let scratch = Scratch::new();
-    let scratch_testdata = scratch.0.join("testdata");
-    fs::create_dir(&scratch_testdata).unwrap();
-    for name in ["tolerances.toml", "departures.toml"] {
-        fs::copy(testdata.join(name), scratch_testdata.join(name)).unwrap();
-    }
-    let path = scratch_testdata.join("fixture.bin");
-    let body = variant::encode(&Variant::Dict(fixture)).unwrap();
-    let mut bytes = b"GSCORP01".to_vec();
-    bytes.extend(u32::try_from(body.len()).unwrap().to_le_bytes());
-    bytes.extend(body);
-    fs::write(&path, bytes).unwrap();
-
+    let mut relief_cases = 0;
     let report = tolerance::check(&path, "rules", |case| {
         let call = field(case, "call").as_str().unwrap();
-        let actual = replay(call, dict(field(case, "input")));
-        if !integers_match(field(case, "output"), &actual) {
-            return Err("integer output differs");
-        }
-        Ok(actual)
+        calls.insert(call.to_owned());
+        relief_cases += usize::from(RELIEF_CALLS.contains(&call));
+        checked_replay(case, replay(call, dict(field(case, "input"))))
     })
     .unwrap_or_else(|error| panic!("{error}"));
-    assert_eq!(report.checked, 502);
+    assert_eq!(
+        calls,
+        RULES_CALLS
+            .into_iter()
+            .chain(RELIEF_CALLS)
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(report.checked, 585);
+    assert_eq!(relief_cases, 83);
     assert!(report.discrete.is_empty());
     assert!(report.skipped.is_empty());
     print!("{report}");
-    println!("All C21 fixture outputs matched the rules tolerance with zero discrete differences.");
+    println!(
+        "All 585 transition cases matched the rules tolerance, including 83 relief transitions."
+    );
+}
+
+pub(crate) fn checked_replay(case: &Dict, actual: Variant) -> Result<Variant, &'static str> {
+    if integers_match(field(case, "output"), &actual) {
+        Ok(actual)
+    } else {
+        Err("integer output differs")
+    }
 }
 
 #[test]
@@ -162,7 +133,7 @@ fn pick_up_ends_play_at_the_current_count() {
     assert_eq!(refused.rules, done.rules);
 }
 
-fn replay(call: &str, input: &Dict) -> Variant {
+pub(crate) fn replay(call: &str, input: &Dict) -> Variant {
     let get = |key| field(input, key);
     let rules = || read_rules(get("rules"));
     match call {
@@ -213,6 +184,64 @@ fn replay(call: &str, input: &Dict) -> Variant {
                 .into_iter()
                 .map(|option| enum_value(OPTIONS, option)),
         ),
+        "rules.relief_available" => Variant::Bool(relief::relief_available(
+            &rules(),
+            &legal_course(dict(get("legal"))).legal(),
+            &read_relief(get("area")),
+            &read_condition(get("condition")),
+        )),
+        "rules.ask_relief" => step_value(&relief::ask_relief(
+            &rules(),
+            read_relief(get("area")),
+            &legal_course(dict(get("legal"))).legal(),
+            &mut NoProbe,
+        )),
+        "rules.unplayable_options" => array(
+            relief::unplayable_options(
+                &rules(),
+                boolean(get("in_bunker")),
+                boolean(get("in_penalty")),
+            )
+            .into_iter()
+            .map(|option| enum_value(OPTIONS, option)),
+        ),
+        "rules.declare_unplayable" => step_value(&relief::declare_unplayable(
+            &rules(),
+            read_relief(get("area")),
+            &legal_course(dict(get("legal"))).legal(),
+            choice(AREAS, get("from_area")),
+            &mut NoProbe,
+        )),
+        "rules.embedded_available" => Variant::Bool(relief::embedded_available(
+            &rules(),
+            &read_relief(get("area")),
+            &legal_course(dict(get("legal"))).legal(),
+        )),
+        "rules.embedded_relief" => step_value(&relief::embedded_relief(
+            &rules(),
+            read_relief(get("area")),
+            &legal_course(dict(get("legal"))).legal(),
+            &mut NoProbe,
+        )),
+        "rules.after_drop" => {
+            let drop = dict(get("drop"));
+            step_value(&relief::after_drop(
+                &rules(),
+                &DropResult {
+                    first: optional_point(field(drop, "first")),
+                    rest: optional_point(field(drop, "rest")),
+                },
+                &legal_course(dict(get("legal"))).legal(),
+                &mut NoProbe,
+            ))
+        }
+        "rules.place" => step_value(&relief::place(&rules(), point3(get("spot")), &mut NoProbe)),
+        "rules.choose_penalty" => step_value(&relief::choose_penalty(
+            &rules(),
+            read_relief(get("area")),
+            choice(AREAS, get("from_area")),
+            &mut NoProbe,
+        )),
         _ => panic!("unexpected call {call}"),
     }
 }
@@ -266,7 +295,7 @@ const AREAS: &[Area] = &[
     Area::Penalty,
 ];
 const ENDS: &[End] = &[End::AtRest, End::Holed, End::InWater, End::TimedOut];
-const NO_POINT: Vec3 = Vec3::new(Real::INFINITY, Real::INFINITY, Real::INFINITY);
+pub(crate) const NO_POINT: Vec3 = Vec3::new(Real::INFINITY, Real::INFINITY, Real::INFINITY);
 
 fn read_outcome(value: &Variant) -> StrokeOutcome {
     let get = |key| field(dict(value), key);
@@ -284,7 +313,7 @@ fn read_outcome(value: &Variant) -> StrokeOutcome {
     }
 }
 
-fn read_rules(value: &Variant) -> HoleRules {
+pub(crate) fn read_rules(value: &Variant) -> HoleRules {
     let rules = dict(value);
     HoleRules {
         tee: point3(field(rules, "tee")),
@@ -301,6 +330,7 @@ fn read_ruling(value: &Variant) -> Ruling {
         status: choice(STATUSES, get("status")),
         consequence: choice(CONSEQUENCES, get("next")),
         penalty_strokes: usize::try_from(integer(get("penalty_strokes"))).unwrap(),
+        reason: None,
         relief: nullable(get("relief"), read_relief),
         drops: usize::try_from(integer(get("drops"))).unwrap(),
         place_at: optional_point(get("place_at")),
@@ -317,9 +347,8 @@ fn read_ruling(value: &Variant) -> Ruling {
     }
 }
 
-fn read_relief(value: &Variant) -> ReliefArea {
+pub(crate) fn read_relief(value: &Variant) -> ReliefArea {
     let get = |key| field(dict(value), key);
-    assert_eq!(get("condition"), &Variant::Nil);
     ReliefArea {
         option: choice(OPTIONS, get("option")),
         reference: point3(get("reference")),
@@ -331,9 +360,34 @@ fn read_relief(value: &Variant) -> ReliefArea {
         green: outline(get("green")),
         required_area: id_of(get("required_area")).map(|id| AREAS[id]),
         green_placement: boolean(get("green_placement")),
+        condition: nullable(get("condition"), read_condition),
         footprint: outline(get("footprint")),
         ball_radius_m: real(get("ball_radius_m")),
     }
+}
+
+pub(crate) fn read_kind(value: &Variant) -> AbnormalKind {
+    match value.as_str().unwrap() {
+        "Temporary water" => AbnormalKind::TemporaryWater,
+        "Ground under repair" => AbnormalKind::GroundUnderRepair,
+        "Immovable obstruction" => AbnormalKind::ImmovableObstruction,
+        label => panic!("unknown condition {label}"),
+    }
+}
+
+pub(crate) fn read_condition(value: &Variant) -> AbnormalCondition {
+    let condition = dict(value);
+    AbnormalCondition::new(
+        read_kind(field(condition, "name")),
+        outline(field(condition, "outline")),
+    )
+}
+
+pub(crate) fn condition_value(condition: &AbnormalCondition) -> Variant {
+    object([
+        ("name", condition.kind.name().into()),
+        ("outline", outline_value(&condition.outline)),
+    ])
 }
 
 fn read_penalty(value: &Variant) -> PenaltyAreaValue {
@@ -368,6 +422,27 @@ fn step_value(step: &RulesStep) -> Variant {
         }
         Some(RulesRefusal::ProvisionalNotPlayed) => "the provisional has not been played".into(),
         Some(RulesRefusal::ProvisionalUnavailable) => "a provisional ball is unavailable".into(),
+        Some(RulesRefusal::NoConditionInterference) => {
+            "the condition does not interfere with play".into()
+        }
+        Some(RulesRefusal::NotInBunker) => "the ball is not in a bunker".into(),
+        Some(RulesRefusal::NoCompleteRelief) => "there is no point of complete relief".into(),
+        Some(RulesRefusal::UnplayableOptionUnavailable) => {
+            "that unplayable-ball option is unavailable".into()
+        }
+        Some(RulesRefusal::EmbeddedBallUnavailable) => {
+            "there is no embedded ball in the general area".into()
+        }
+        Some(RulesRefusal::NoDropPending) => "no drop is pending".into(),
+        Some(RulesRefusal::DropFirstOutsideReliefArea) => {
+            "the drop first touched outside the relief area".into()
+        }
+        Some(RulesRefusal::WrongPlacementSpot) => {
+            "the ball must be placed at the required spot".into()
+        }
+        Some(RulesRefusal::PenaltyOptionUnavailable) => {
+            "that penalty-area option is unavailable".into()
+        }
         Some(RulesRefusal::HoleFinished) => panic!("pick-up has no fixture call"),
     };
     object([
@@ -459,7 +534,12 @@ fn relief_value(area: &ReliefArea) -> Variant {
                 .map_or_else(|| (-1).into(), |area| enum_value(AREAS, area)),
         ),
         ("green_placement", Variant::Bool(area.green_placement)),
-        ("condition", Variant::Nil),
+        (
+            "condition",
+            area.condition
+                .as_ref()
+                .map_or(Variant::Nil, condition_value),
+        ),
         ("footprint", outline_value(&area.footprint)),
         ("ball_radius_m", area.ball_radius_m.into()),
     ])
@@ -472,7 +552,7 @@ fn penalty_value(area: &PenaltyAreaValue) -> Variant {
     ])
 }
 
-fn legal_course(legal: &Dict) -> std::sync::Arc<Course> {
+pub(crate) fn legal_course(legal: &Dict) -> std::sync::Arc<Course> {
     let get = |key| items(field(legal, key));
     let bounds = get("in_bounds").iter().map(surface_tile).collect();
     let mut regions = Vec::new();
@@ -633,7 +713,7 @@ fn synthetic_course(
     Course::parse(&variant::encode(&payload).unwrap()).unwrap()
 }
 
-fn integers_match(expected: &Variant, actual: &Variant) -> bool {
+pub(crate) fn integers_match(expected: &Variant, actual: &Variant) -> bool {
     match (expected, actual) {
         (Variant::Int(a), Variant::Int(b)) => a.value() == b.value(),
         (Variant::Dict(a), Variant::Dict(b)) => a.entries().iter().all(|(key, value)| {
@@ -653,45 +733,45 @@ fn array(values: impl IntoIterator<Item = Variant>) -> Variant {
     Variant::Array(Array::new(values.into_iter().collect()))
 }
 
-fn double<T>(values: T) -> Components<T> {
+pub(crate) fn double<T>(values: T) -> Components<T> {
     Components {
         values,
         width: FloatWidth::Double,
     }
 }
 
-fn point_value(p: Vec3) -> Variant {
+pub(crate) fn point_value(p: Vec3) -> Variant {
     Variant::Vector3(double([p.x, p.y, p.z]))
 }
 
-fn outline_value(points: &[Vec2]) -> Variant {
+pub(crate) fn outline_value(points: &[Vec2]) -> Variant {
     Variant::PackedVector2Array(double(points.iter().map(|p| [p.x, p.y]).collect()))
 }
 
-fn dict(value: &Variant) -> &Dict {
+pub(crate) fn dict(value: &Variant) -> &Dict {
     value.as_dict().expect("expected a dictionary")
 }
 
-fn field<'a>(dict: &'a Dict, key: &str) -> &'a Variant {
+pub(crate) fn field<'a>(dict: &'a Dict, key: &str) -> &'a Variant {
     dict.get(key)
         .unwrap_or_else(|| panic!("missing field {key}"))
 }
 
-fn items(value: &Variant) -> &[Variant] {
+pub(crate) fn items(value: &Variant) -> &[Variant] {
     let Variant::Array(array) = value else {
         panic!("expected an array")
     };
     &array.items
 }
 
-fn integer(value: &Variant) -> i64 {
+pub(crate) fn integer(value: &Variant) -> i64 {
     let Variant::Int(n) = value else {
         panic!("expected an integer")
     };
     n.value()
 }
 
-fn real(value: &Variant) -> Real {
+pub(crate) fn real(value: &Variant) -> Real {
     let Variant::Float(n) = value else {
         panic!("expected a float")
     };
@@ -705,7 +785,7 @@ fn boolean(value: &Variant) -> bool {
     *flag
 }
 
-fn point3(value: &Variant) -> Vec3 {
+pub(crate) fn point3(value: &Variant) -> Vec3 {
     let Variant::Vector3(v) = value else {
         panic!("expected a Vector3")
     };
@@ -713,7 +793,7 @@ fn point3(value: &Variant) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
-fn outline(value: &Variant) -> Vec<Vec2> {
+pub(crate) fn outline(value: &Variant) -> Vec<Vec2> {
     let Variant::PackedVector2Array(points) = value else {
         panic!("expected an outline")
     };
@@ -743,24 +823,4 @@ fn choice<T: Copy>(choices: &[T], value: &Variant) -> T {
 
 fn enum_value<T: PartialEq>(choices: &[T], value: T) -> Variant {
     (choices.iter().position(|choice| *choice == value).unwrap() as i64).into()
-}
-
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("golf-rules-{}-{now}", std::process::id()));
-        fs::create_dir(&path).unwrap();
-        Self(path)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
 }

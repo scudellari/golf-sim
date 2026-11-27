@@ -371,7 +371,7 @@ fn incompatible_and_malformed_records_are_refused() {
         ("commit", option_env!("GOLF_SIM_COMMIT").unwrap_or("dev")),
         ("physics", golf_sim_physics::tunables::VERSION),
         ("tuning", golf_sim_stroke::tuning::VERSION),
-        ("rules", "unversioned"),
+        ("rules", golf_sim_rules::VERSION),
     ] {
         assert_eq!(record.versions.get(model), Some(&current.into()));
         *record.versions.get_mut(model).unwrap() = "incompatible".into();

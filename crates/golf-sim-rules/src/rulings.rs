@@ -1,5 +1,7 @@
 //! A hole's rulings and the decision they leave to the player.
 
+use crate::relief::{AbnormalCondition, ReliefReason};
+
 use golf_sim_base::{PromptKind, Real, Vec2, Vec3};
 use golf_sim_course::{
     course::PenaltyColor,
@@ -88,6 +90,7 @@ pub struct ReliefArea {
     pub green: Vec<Vec2>,
     pub required_area: Option<Area>,
     pub green_placement: bool,
+    pub condition: Option<AbnormalCondition>,
     pub footprint: Vec<Vec2>,
     pub ball_radius_m: Real,
 }
@@ -97,6 +100,7 @@ pub struct Ruling {
     pub status: Status,
     pub consequence: Consequence,
     pub penalty_strokes: usize,
+    pub reason: Option<ReliefReason>,
     pub relief: Option<ReliefArea>,
     pub drops: usize,
     pub place_at: Option<Vec3>,
@@ -124,6 +128,7 @@ impl Ruling {
             status,
             consequence,
             penalty_strokes: 0,
+            reason: None,
             relief: None,
             drops: 0,
             place_at: None,
@@ -272,6 +277,15 @@ pub enum RulesRefusal {
     ProvisionalNotPlayed,
     ProvisionalUnavailable,
     HoleFinished,
+    NoConditionInterference,
+    NotInBunker,
+    NoCompleteRelief,
+    UnplayableOptionUnavailable,
+    EmbeddedBallUnavailable,
+    NoDropPending,
+    DropFirstOutsideReliefArea,
+    WrongPlacementSpot,
+    PenaltyOptionUnavailable,
 }
 
 #[derive(Clone, Debug, PartialEq)]
