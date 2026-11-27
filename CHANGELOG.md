@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-11-27)
+
+- **`golf corpus` checks every phase 1 layer.** `golf corpus check` and `golf corpus drift` run course, physics, world and stroke fixtures through the same runners as the tests, and `--course-dir` opens the course a fixture names, so a consumer can compare its own courses' fixtures.
+- **Repro bundles and debugging.** Hole repro bundles with `golf replay`, `golf explain` and `golf scenario from-repro`, a `debugging` build profile, `just debug-replay <bundle>` and the debugging guide in `docs/how-to/debug.md`.
+- **Stable fixtures.** Determinism digests and committed records no longer change with the release number.
+
 ## 0.2.0 (2026-11-27)
 
 A stroke plays on a constant day, and a hole plays to the cup. The physics is version 0.11.0, checked against published measurements, and every layer was compared with the earlier implementation within its stated tolerance.
