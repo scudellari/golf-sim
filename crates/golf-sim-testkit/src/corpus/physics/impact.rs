@@ -385,6 +385,48 @@ fn strike_bounds(
     .error
 }
 
+fn launch_readouts_match(launch: &Dict, request: &ShotRequest) -> bool {
+    const UP: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+    let velocity = vec3(launch, "velocity");
+    let spin = vec3(launch, "spin");
+    let forward = Vec3::new(request.aim.x, 0.0, request.aim.z).normalized();
+    let right = forward.cross(UP);
+    let horizontal = Vec2::new(velocity.dot(forward), velocity.dot(right));
+    let side = (forward * horizontal.x + right * horizontal.y)
+        .normalized()
+        .cross(UP);
+    let horizontal_spin = Vec2::new(spin.x, spin.z).length();
+    let signed_spin = if spin.dot(side) < 0.0 {
+        -horizontal_spin
+    } else {
+        horizontal_spin
+    };
+    let speed = velocity.length();
+    let club_speed = request.delivery.club_speed_mps;
+    let smash = if club_speed > 0.0 {
+        speed / club_speed
+    } else {
+        0.0
+    };
+    // The core's snapshot preserves the doubles used to compute these readouts.
+    [
+        ("ball_speed_mps", speed),
+        (
+            "launch_angle_rad",
+            fm::atan2(velocity.y, horizontal.length()),
+        ),
+        (
+            "launch_direction_rad",
+            fm::atan2(horizontal.y, horizontal.x),
+        ),
+        ("spin_rate_rad_s", spin.length()),
+        ("spin_axis_rad", fm::atan2(-spin.y, signed_spin)),
+        ("smash_factor", smash),
+    ]
+    .into_iter()
+    .all(|(key, derived)| number(launch, key) == derived)
+}
+
 impl CollisionFrame<'_> {
     fn face_height(self, center_y: Real, sole_y: Real, toe: Real) -> Option<Real> {
         let club = &self.request.club;
@@ -503,6 +545,7 @@ impl CollisionFrame<'_> {
         let spin = direct.spin.lerp(sand_spin, blend);
         if (vec3(launch, "velocity") - velocity).length() > 1e-10 * velocity.length().max(1.0)
             || (vec3(launch, "spin") - spin).length() > 1e-10 * spin.length().max(1.0)
+            || !launch_readouts_match(launch, self.request)
         {
             return None;
         }
@@ -1190,6 +1233,33 @@ mod tests {
         let mutated = launch.velocity + Vec3::new(0.0, -0.002, 0.0);
         *wrong_core.get_mut("velocity").unwrap() = vector(mutated);
         assert_eq!(compare_velocity(wrong_core), mutated);
+
+        let key = "ball_speed_mps";
+        let mutated = launch.readout.ball_speed_mps + 0.002;
+        let mut wrong_core = actual.clone();
+        *wrong_core.get_mut(key).unwrap() = mutated.into();
+        compare_launch_rounding(
+            dict(&case),
+            actual,
+            &mut wrong_core,
+            &request,
+            &ground,
+            false,
+        )
+        .unwrap();
+        assert_eq!(number(&wrong_core, key), mutated);
+
+        for key in [
+            "launch_angle_rad",
+            "launch_direction_rad",
+            "spin_rate_rad_s",
+            "spin_axis_rad",
+            "smash_factor",
+        ] {
+            let mut wrong_core = actual.clone();
+            *wrong_core.get_mut(key).unwrap() = (number(actual, key) + 0.002).into();
+            assert_eq!(compare_velocity(wrong_core), launch.velocity, "{key}");
+        }
     }
 
     #[test]
