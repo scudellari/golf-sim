@@ -37,3 +37,8 @@ tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 toml = "1.2.3"
 # No experimental-threads: every call into the core runs on Godot's main thread.
 godot = { version = "=0.5.6", features = ["api-4-7"] }
+
+[profile.debugging]
+inherits = "release"
+debug = "full"
+strip = "none"
