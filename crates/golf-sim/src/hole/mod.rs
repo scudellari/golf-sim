@@ -14,12 +14,16 @@ use golf_sim_base::{
 use golf_sim_conditions::{lies::BallLie, world::World};
 use golf_sim_course::course::Course;
 use golf_sim_rules::{rulings::HoleRules, transitions};
-use golf_sim_stroke::results::StrokeResult;
+use golf_sim_stroke::{
+    delivery::DeliveryInput,
+    results::StrokeResult,
+    stroke::{self, StrokeInput},
+};
 
 use crate::{
     action::Action,
-    records::hole::{HoleRecord, Refusal},
-    setup::HoleSetup,
+    records::hole::{Entry, HoleRecord, Refusal, StrokeFacts},
+    setup::{HoleSetup, Mode},
 };
 
 #[derive(Debug)]
@@ -124,7 +128,85 @@ impl Hole {
         &self.traces
     }
 
-    fn world_at(&self, clock_s: Real) -> World<'_> {
+    pub(crate) fn course(&self) -> &Course {
+        &self.course
+    }
+
+    pub(crate) fn last_address_lie(&self) -> BallLie {
+        self.last_lie
+    }
+
+    fn stroke_facts(&self) -> impl Iterator<Item = &StrokeFacts> {
+        self.record
+            .entries
+            .iter()
+            .rev()
+            .filter_map(|entry| match entry {
+                Entry::Stroke(stroke) => Some(&stroke.facts),
+                Entry::Decision(_) => None,
+            })
+    }
+
+    pub(crate) fn last_address(&self) -> Option<&StrokeFacts> {
+        self.stroke_facts().next()
+    }
+
+    pub(crate) fn advice_in(&self, mode: Mode) -> Option<advice::Advice> {
+        if self.record.setup.settings.info_mode == mode {
+            return self.advice();
+        }
+        let mut record = self.record.clone();
+        record.setup.settings.info_mode = mode;
+        Self {
+            course: self.course.clone(),
+            record,
+            rules: self.rules.clone(),
+            clock_s: self.clock_s,
+            attempt: self.attempt,
+            ball_lie: self.ball_lie,
+            last_lie: self.last_lie,
+            rest_lie: self.rest_lie,
+            original_lie: self.original_lie,
+            trace_limit: 0,
+            traces: VecDeque::new(),
+        }
+        .advice()
+    }
+
+    pub(crate) fn last_stroke(&self) -> Option<(&StrokeFacts, StrokeResult)> {
+        // The record keeps the resolved stroke and its rest. Rebuild its report
+        // from the lie and clock the stroke originally read.
+        let mut strokes = self.stroke_facts();
+        let last = strokes.next()?;
+        let clock_s = strokes
+            .next()
+            .map_or(self.record.setup.tee_time_s, |previous| previous.clock_s);
+        let world = self.world_at(clock_s);
+        let club = last.club_id;
+        let lie = world.address_lie(self.last_lie, &last.address.footprint(club), last.aim);
+        let seed = self
+            .record
+            .setup
+            .seed
+            .derive(&format!("attempt/{}", last.attempt));
+        let input = StrokeInput {
+            delivery: DeliveryInput {
+                club,
+                address: last.address.clone(),
+                lie,
+                attempt_seed: seed,
+            },
+            aim: last.aim,
+            gust_time_s: last.gust_time_s,
+            flagstick_in: last.flagstick_in,
+        };
+        Some((
+            last,
+            stroke::play(&input, last.execution, &world, &mut NoProbe),
+        ))
+    }
+
+    pub(crate) fn world_at(&self, clock_s: Real) -> World<'_> {
         self.record
             .setup
             .world(&self.course, clock_s)

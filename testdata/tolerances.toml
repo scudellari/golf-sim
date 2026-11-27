@@ -203,6 +203,40 @@ rel = 0.0
 f32_steps = 8
 discrete_share = 0.005
 
+["hole/observe"]
+abs = 0.0
+rel = 0.0
+f32_steps = 8
+discrete_share = 0.005
+
+["hole/observe".fields]
+ball_position = { abs = 0.05 }
+cup = { abs = 0.05 }
+landing = { abs = 0.05 }
+aim_point = { abs = 0.05 }
+target_distance_m = { abs = 0.05 }
+range_distance_m = { abs = 0.05 }
+range_rise_m = { abs = 0.05 }
+"card[*].from" = { abs = 0.05 }
+"card[*].rest" = { abs = 0.05 }
+"card[*].distance_m" = { abs = 0.05 }
+putt_line = { abs = 0.05 }
+nominal_roll_m = { abs = 0.05 }
+plays_like_m = { abs = 0.1 }
+carry_m = { abs = 0.1 }
+carry_to_target_m = { abs = 0.1 }
+stock_carry_m = { abs = 0.1 }
+nominal_carry_m = { abs = 0.1 }
+flag_wind_mps = { rel = 1e-4 }
+felt_mps = { rel = 1e-4 }
+ground_mps = { rel = 1e-4 }
+wind_mps = { rel = 1e-4 }
+wind_aloft_mps = { rel = 1e-4 }
+# Address slopes are differences between ground samples at course coordinates.
+slope_along_rad = { f32_steps = 8, scale_from = ["input.ball_lie.spot"] }
+slope_across_rad = { f32_steps = 8, scale_from = ["input.ball_lie.spot"] }
+ball_slope_along_rad = { f32_steps = 8, scale_from = ["input.ball_lie.spot"] }
+
 [round]
 abs = 0.0
 rel = 0.0
