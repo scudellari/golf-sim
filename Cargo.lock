@@ -295,6 +295,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "toml",
  "tracing-subscriber",
 ]
 
