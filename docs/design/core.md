@@ -419,6 +419,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C66](https://github.com/scudellari/golf-sim/issues/65) | Cup capture on slopes | Physics solver | codex | C12, C54, C65 | ~200 |
 | [C67](https://github.com/scudellari/golf-sim/issues/66) | Green bounce across the iron range | Physics solver | codex | C12, C54, C66 | ~350 |
 | [C68](https://github.com/scudellari/golf-sim/issues/67) | Lift capped near spin ratio 0.3, then a refit | Physics solver | codex | C11, C54, C67 | ~300 |
+| [C71](https://github.com/scudellari/golf-sim/issues/73) | `golf corpus` runners for the phase 1 layers | Tools | codex | C18, C54, C68 | ~600 |
 
 ### Phase 2. A hole on a constant day
 
@@ -438,6 +439,8 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C55](https://github.com/scudellari/golf-sim/issues/60) | `golf sweep` and `golf scenario`: balance reports and expected results | Hole, testing and CLI | codex | C28, C58 | ~450 |
 | [C59](https://github.com/scudellari/golf-sim/issues/61) | Repro bundles: replay a failure, explain it, and turn it into a test | Hole, testing and CLI | codex | C55, C58, C68 | ~400 |
 | [C60](https://github.com/scudellari/golf-sim/issues/62) | Debugging guide: breakpoints in the program and in Godot | Hole, testing and CLI | codex | C59 | ~150 |
+| [C72](https://github.com/scudellari/golf-sim/issues/74) | `golf corpus` runners for the phase 2 layers | Hole, testing and CLI | codex | C71, C26, C51 | ~450 |
+| [C73](https://github.com/scudellari/golf-sim/issues/71) | Keep the release version out of determinism digests and committed records | Hole, testing and CLI | codex | C24, C27, C59 | ~120 |
 
 ### Phase 3. The person's console, headless
 
