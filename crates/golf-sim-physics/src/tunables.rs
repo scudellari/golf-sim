@@ -3,7 +3,7 @@
 use crate::values::{BallSpec, ClubCategory, ClubSpec, ObstacleKind};
 use golf_sim_base::{ClubId, Real, Surface, num::deg_to_rad};
 
-pub const VERSION: &str = "0.11.0";
+pub const VERSION: &str = "0.11.1";
 
 // Constants
 

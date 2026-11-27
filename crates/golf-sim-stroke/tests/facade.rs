@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use golf_sim_base::{ClubId, Seed, Surface, Vec3, trace::NoProbe, variant::Variant};
+use golf_sim_base::{ClubId, Real, Seed, Surface, Vec3, trace::NoProbe, variant::Variant};
 use golf_sim_conditions::{
     grounds::PracticeGround,
     lies::{BallLie, Sit},
@@ -9,7 +9,7 @@ use golf_sim_conditions::{
 use golf_sim_physics::{
     facade as sim,
     plane::{ConstantAir, PlaneGround},
-    samplers::AirSample,
+    samplers::{AirSample, GroundSample},
     values::units,
 };
 use golf_sim_stroke::{
@@ -46,6 +46,74 @@ fn every_recorded_stroke_call_matches() {
 }
 
 struct StockModel;
+
+fn stock_carry(club: ClubId, lie: BallLie) -> Real {
+    let sample = GroundSample {
+        surface: lie.surface,
+        ..GroundSample::default()
+    };
+    let world = World::practice(
+        PlaneGround::new(sample, Vec3::ZERO),
+        ConstantAir::default(),
+        lie,
+        None,
+        0.0,
+    );
+    let aim = Vec3::new(0.0, 0.0, -1.0);
+    let address = stroke::stock(club);
+    let ball = stroke::place(Vec3::ZERO, &world, Seed(0), &mut NoProbe);
+    let lie = world.address_lie(ball, &stroke::footprint(club, &address), aim);
+    let input = StrokeInput::new(
+        DeliveryInput {
+            club,
+            address,
+            lie,
+            attempt_seed: Seed(1),
+        },
+        aim,
+    );
+    stroke::nominal_shot(&input, &world).carry_m()
+}
+
+fn fairway_carry(club: ClubId) -> Real {
+    stock_carry(club, BallLie::on(Surface::Fairway, Sit::Normal, Vec3::ZERO))
+}
+
+#[test]
+fn a_wedge_or_short_iron_advances_out_of_native_fescue() {
+    use ClubId::{Hybrid, Iron5, Iron7, Iron9, LobWedge, PitchingWedge, SandWedge};
+
+    let clubs = [
+        LobWedge,
+        SandWedge,
+        PitchingWedge,
+        Iron9,
+        Iron7,
+        Iron5,
+        Hybrid,
+    ];
+    let fairway = clubs.map(fairway_carry);
+    for sit in [Sit::Up, Sit::Normal, Sit::Down] {
+        let mut lie = BallLie::on(Surface::DeepRough, sit, Vec3::ZERO);
+        lie.set_grass(0.42);
+        let shares = std::array::from_fn::<_, 7, _>(|i| stock_carry(clubs[i], lie) / fairway[i]);
+        println!("{sit:?} fescue carry shares: {shares:.3?}");
+        for (club, share) in clubs.into_iter().zip(shares).take(3) {
+            assert!((0.4..=0.8).contains(&share), "{club:?} {sit:?}: {share:.3}");
+        }
+        let short_iron = shares[3];
+        assert!(
+            (0.25..=0.6).contains(&short_iron),
+            "9-iron {sit:?}: {short_iron:.3}"
+        );
+        for (club, share) in clubs.into_iter().zip(shares).skip(4) {
+            assert!(
+                share < short_iron,
+                "{club:?} {sit:?}: {share:.3} >= {short_iron:.3}"
+            );
+        }
+    }
+}
 
 impl Model for StockModel {
     fn predict(&self, target: &Target, _: &Conditions) -> Option<Quantities> {

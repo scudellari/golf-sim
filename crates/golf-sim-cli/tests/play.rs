@@ -31,7 +31,7 @@ fn caddie_transcript_holes_out_and_saves_the_committed_record() {
     );
 
     let reference = fs::read(data().join("cli/caddie.rec")).unwrap();
-    assert_eq!(masked_record_bytes(&bytes), masked_record_bytes(&reference));
+    assert_eq!(bytes, record_for_current_build(&reference));
     let record = HoleRecord::from_bytes(&bytes).unwrap();
     assert_eq!(
         record.versions.get("release").and_then(Variant::as_str),
@@ -49,7 +49,7 @@ fn caddie_transcript_holes_out_and_saves_the_committed_record() {
         );
     }
     println!(
-        "Caddie holed out in 3 strokes, 12 replies matched, and the record matched after masking the build stamp"
+        "Caddie holed out in 3 strokes, 12 replies matched, and the restamped record matched bit for bit"
     );
 }
 

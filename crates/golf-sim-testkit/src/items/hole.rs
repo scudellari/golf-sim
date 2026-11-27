@@ -40,15 +40,25 @@ fn open_course() -> Arc<Course> {
 
 /// Mask the build stamp in a hole record or a single-stroke repro.
 pub fn masked_record_bytes(bytes: &[u8]) -> Vec<u8> {
-    with_build_stamp(bytes, "determinism", "determinism")
+    with_stamps(
+        bytes,
+        &[("release", "determinism"), ("commit", "determinism")],
+    )
 }
 
-/// Restamp a fixture copy for replay, which requires the build that wrote it.
+/// Restamp a fixture copy to replay its saved results against the current physics.
 pub fn record_for_current_build(bytes: &[u8]) -> Vec<u8> {
-    with_build_stamp(bytes, env!("CARGO_PKG_VERSION"), GOLF_SIM_COMMIT)
+    with_stamps(
+        bytes,
+        &[
+            ("release", env!("CARGO_PKG_VERSION")),
+            ("commit", GOLF_SIM_COMMIT),
+            ("physics", golf_sim_physics::tunables::VERSION),
+        ],
+    )
 }
 
-fn with_build_stamp(bytes: &[u8], release: &str, commit: &str) -> Vec<u8> {
+fn with_stamps(bytes: &[u8], stamps: &[(&str, &str)]) -> Vec<u8> {
     let (magic, rest) = bytes.split_first_chunk::<8>().unwrap();
     assert!(matches!(magic, b"LLHOLE01" | b"GSSTROK1"));
     let (size, body) = rest.split_first_chunk::<4>().unwrap();
@@ -60,7 +70,7 @@ fn with_build_stamp(bytes: &[u8], release: &str, commit: &str) -> Vec<u8> {
     let Some(Variant::Dict(versions)) = dict.get_mut("versions") else {
         panic!("expected record versions");
     };
-    for (name, stamp) in [("release", release), ("commit", commit)] {
+    for &(name, stamp) in stamps {
         let value = versions.get_mut(name).unwrap();
         assert!(value.as_str().is_some(), "expected a string for {name}");
         *value = stamp.into();

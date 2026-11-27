@@ -1,9 +1,11 @@
 use std::path::Path;
 
 use golf_sim_base::{
-    Seed, Surface, Vec3,
+    Real, Seed, Surface, Vec2, Vec3,
+    container::Manifest,
     seed::SeedStream,
-    trace::{Phase, Source, Trace},
+    trace::{NoProbe, Phase, Source, Trace},
+    variant::{self, Variant},
 };
 use golf_sim_conditions::{
     grounds::CourseGround,
@@ -13,7 +15,7 @@ use golf_sim_conditions::{
 use golf_sim_course::{course::Course, legal::StanceFootprint};
 use golf_sim_physics::{
     plane::{ConstantAir, PlaneGround},
-    samplers::AirSampler,
+    samplers::{AirSampler, GroundSampler},
 };
 use golf_sim_testkit::corpus as fixture_corpus;
 
@@ -71,6 +73,46 @@ fn course_settle_traces_the_draw_and_turf() {
         .unwrap();
     assert_eq!(turf.value.to_bits(), ball.grass_height_m.to_bits());
     assert!(matches!(turf.source, Source::Turf { .. }));
+}
+
+fn course_with_deep_rough(height_m: Real) -> std::sync::Arc<Course> {
+    let dir = testdata().join("courses/test-course");
+    let course = Course::open(&dir).unwrap();
+    let index = usize::from(course.material_index_at(Vec2::ZERO).unwrap().0);
+    let bytes = Manifest::read(&dir).unwrap().read_payload(&dir).unwrap();
+    let Variant::Dict(mut payload) = variant::decode(&bytes).unwrap() else {
+        panic!("expected a course dictionary");
+    };
+    let Variant::Array(materials) = payload.get_mut("materials").unwrap() else {
+        panic!("expected a material table");
+    };
+    let Variant::Dict(material) = &mut materials.items[index] else {
+        panic!("expected a material dictionary");
+    };
+    *material.get_mut("kind").unwrap() = "DEEP_ROUGH".into();
+    *material.get_mut("grass_height_m").unwrap() = height_m.into();
+    let Variant::Dict(property) = payload.get_mut("property").unwrap() else {
+        panic!("expected a property dictionary");
+    };
+    let Variant::Dict(surface) = property.get_mut("surface").unwrap() else {
+        panic!("expected a surface dictionary");
+    };
+    if let Some(stand) = surface.get_mut("stand") {
+        *stand = Variant::PackedByteArray(Vec::new());
+    }
+    Course::parse(&variant::encode(&Variant::Dict(payload)).unwrap()).unwrap()
+}
+
+#[test]
+fn settling_on_course_fescue_uses_the_height_of_its_stand() {
+    let course = course_with_deep_rough(0.42);
+    let ground = CourseGround::new(&course, 0.5, 0.3, 2.85);
+    assert_eq!(ground.sample_ground(0.0, 0.0).grass_height_m, 0.42);
+    let world = World::on_course(ground, ConstantAir::default(), None, 0.0);
+    let lie = world.settle(Vec3::ZERO, Seed(1), &mut NoProbe);
+    assert_eq!(lie.surface, Surface::DeepRough);
+    assert_eq!(lie.grass_height_m, 0.42);
+    assert!((lie.grass_density - 0.55 * 0.225 / 0.42).abs() < 1e-12);
 }
 
 #[test]

@@ -147,7 +147,7 @@ impl<'a> World<'a> {
             let mut lie = BallLie::on(ground.surface, sit, spot);
             let sampled_grass = is_long_grass(ground.surface) && ground.grass_height_m >= 0.0;
             if sampled_grass {
-                lie.grass_height_m = ground.grass_height_m;
+                lie.set_grass(ground.grass_height_m);
             }
             (lie, draw, sampled_grass)
         };

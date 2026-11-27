@@ -6,6 +6,25 @@ use golf_sim_physics::{samplers::GroundSampler, values::Lie};
 
 const MIN_SPAN_M: Real = 0.05;
 
+// Fine fescue has the leaf density of mown rough. Its leaves stand 150–300 mm
+// (Purdue Extension TURF-67-W), with thin seed stalks above them.
+const LEAF_HEIGHT_M: &[(Surface, Real)] = &[(Surface::DeepRough, 0.225)];
+
+fn sit_profile(surface: Surface) -> ([Real; 3], Real, Real) {
+    match surface {
+        Surface::Fairway => ([8.0, 5.0, 2.0], 12.0, 0.3),
+        Surface::FirstCut => ([12.0, 7.0, 3.0], 25.0, 0.4),
+        Surface::Rough => ([25.0, 10.0, 2.0], 55.0, 0.55),
+        Surface::DeepRough => ([30.0, 8.0, 0.0], 100.0, 0.55),
+        Surface::Fringe => ([5.0, 4.0, 2.0], 10.0, 0.3),
+        Surface::Green => ([2.0; 3], 3.0, 0.2),
+        Surface::Bunker => ([0.0, -2.0, -12.0], 0.0, 0.0),
+        Surface::Tee | Surface::Hardpan | Surface::CartPath | Surface::Water => {
+            ([0.0; 3], 0.0, 0.0)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Sit {
@@ -37,27 +56,29 @@ pub struct BallLie {
 
 impl BallLie {
     pub fn on(surface: Surface, sit: Sit, spot: Vec3) -> Self {
-        let (ball_mm, grass_mm, grass_density) = match surface {
-            Surface::Fairway => ([8.0, 5.0, 2.0], 12.0, 0.3),
-            Surface::FirstCut => ([12.0, 7.0, 3.0], 25.0, 0.4),
-            Surface::Rough => ([25.0, 10.0, 2.0], 55.0, 0.55),
-            Surface::DeepRough => ([30.0, 8.0, 0.0], 100.0, 0.85),
-            Surface::Fringe => ([5.0, 4.0, 2.0], 10.0, 0.3),
-            Surface::Green => ([2.0; 3], 3.0, 0.2),
-            Surface::Bunker => ([0.0, -2.0, -12.0], 0.0, 0.0),
-            Surface::Tee | Surface::Hardpan | Surface::CartPath | Surface::Water => {
-                ([0.0; 3], 0.0, 0.0)
-            }
-        };
-        Self {
+        let (ball_mm, grass_mm, _) = sit_profile(surface);
+        let mut lie = Self {
             spot,
             surface,
             sit,
             ball_height_m: ball_mm[sit as usize] / 1000.0,
-            grass_height_m: grass_mm / 1000.0,
-            grass_density,
+            grass_height_m: 0.0,
+            grass_density: 0.0,
             sand_firmness: 0.5,
             divot: DivotLie::None,
+        };
+        lie.set_grass(grass_mm / 1000.0);
+        lie
+    }
+
+    pub fn set_grass(&mut self, height_m: Real) {
+        self.grass_height_m = height_m;
+        self.grass_density = sit_profile(self.surface).2;
+        if let Some(&(_, leaf_m)) = LEAF_HEIGHT_M
+            .iter()
+            .find(|&&(surface, leaf_m)| surface == self.surface && height_m > leaf_m)
+        {
+            self.grass_density *= leaf_m / height_m;
         }
     }
 
@@ -83,6 +104,27 @@ impl BallLie {
 
     pub fn is_teed(&self) -> bool {
         self.surface == Surface::Tee
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_leaf_stand_contributes_to_fescue_density() {
+        let mut fescue = BallLie::on(Surface::DeepRough, Sit::Normal, Vec3::ZERO);
+        assert_eq!(fescue.grass_height_m, 0.1);
+        assert_eq!(fescue.grass_density, 0.55);
+        fescue.set_grass(0.42);
+        assert_eq!(fescue.grass_height_m, 0.42);
+        assert!((fescue.grass_density - 0.55 * 0.225 / 0.42).abs() < 1e-12);
+
+        let mut rough = BallLie::on(Surface::Rough, Sit::Normal, Vec3::ZERO);
+        for height_m in [0.0, 0.055, 0.42] {
+            rough.set_grass(height_m);
+            assert_eq!(rough.grass_density, 0.55);
+        }
     }
 }
 

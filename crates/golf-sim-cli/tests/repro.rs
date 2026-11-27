@@ -437,6 +437,7 @@ fn lip_out_for_build(dir: &Scratch) -> PathBuf {
     let versions = bundle.manifest.extra.get_mut("versions").unwrap();
     versions["release"] = json!(engine.release);
     versions["commit"] = json!(engine.commit);
+    versions["physics"] = json!(golf_sim::physics::tunables::VERSION);
     bundle.manifest.engine.release = engine.release;
     bundle.manifest.engine.commit = engine.commit;
     let path = dir.0.join("lip-out");
