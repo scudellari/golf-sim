@@ -9,7 +9,7 @@ use golf_sim_conditions::{
     grounds::{CourseGround, PracticeGround},
     lies::{BallLie, DivotLie, Sit},
     wear::{BallMark, Divot, DivotState, Wear, WearMark, WearMarkKind},
-    world::World,
+    world::{WindReadout, World},
 };
 use golf_sim_course::{course::Course, legal::StanceFootprint};
 use golf_sim_physics::{
@@ -427,6 +427,26 @@ fn compare_stance(
     Ok(())
 }
 
+fn wind_readout_snapshot(wind: WindReadout, records_treetop: bool) -> Variant {
+    let mut fields = vec![
+        ("mean_mps", vector(wind.mean_mps)),
+        ("gust_mps", vector(wind.gust_mps)),
+        ("ground_mps", vector(wind.ground_mps)),
+        ("felt_mps", vector(wind.felt_mps)),
+        ("under_trees", Variant::Bool(wind.under_trees)),
+    ];
+    if records_treetop {
+        // Constant air returns the same mean wind at every height.
+        fields.push(("treetop_mps", vector(wind.mean_mps)));
+    }
+    fields.extend([
+        ("temperature_c", wind.temperature_c.into()),
+        ("pressure_pa", wind.pressure_pa.into()),
+        ("relative_humidity", wind.relative_humidity.into()),
+    ]);
+    object(fields)
+}
+
 pub(super) fn replay(
     case: &Dict,
     course: Option<&Course>,
@@ -498,16 +518,8 @@ pub(super) fn replay(
         }
         "world.wind_readout" => {
             let wind = world.wind_readout(spot("spot"), number(input, "gust_time_s"));
-            record! {
-                mean_mps: vector(wind.mean_mps),
-                gust_mps: vector(wind.gust_mps),
-                ground_mps: vector(wind.ground_mps),
-                felt_mps: vector(wind.felt_mps),
-                under_trees: Variant::Bool(wind.under_trees),
-                temperature_c: wind.temperature_c,
-                pressure_pa: wind.pressure_pa,
-                relative_humidity: wind.relative_humidity,
-            }
+            let records_treetop = dict(field(case, "output")).get("treetop_mps").is_some();
+            wind_readout_snapshot(wind, records_treetop)
         }
         "world.wind_at_heights" => {
             let Variant::PackedFloat32Array(heights) = field(input, "heights_m") else {
@@ -553,6 +565,30 @@ pub(super) fn replay(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_constant_world_reports_treetop_mean_when_the_fixture_records_it() {
+        let mean = Vec3::new(2.0, 0.0, 1.0);
+        let air = ConstantAir::new(AirSample {
+            mean_wind_mps: mean,
+            gust_mps: Vec3::new(1.0, 0.0, 0.0),
+            ..AirSample::default()
+        });
+        let spot = Vec3::ZERO;
+        let world = World::practice(
+            PlaneGround::new(GroundSample::default(), spot),
+            air,
+            BallLie::on(Surface::Fairway, Sit::Normal, spot),
+            None,
+            0.0,
+        );
+        let wind = world.wind_readout(spot, 0.0);
+        let modern = wind_readout_snapshot(wind, true);
+        assert_eq!(dict(&modern).get("treetop_mps"), Some(&vector(mean)));
+        assert_eq!(dict(&modern).entries()[5].0.as_str(), Some("treetop_mps"));
+        let legacy = wind_readout_snapshot(wind, false);
+        assert!(dict(&legacy).get("treetop_mps").is_none());
+    }
 
     #[test]
     fn a_rounding_envelope_cannot_hide_an_incorrect_grade() {
