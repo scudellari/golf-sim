@@ -446,6 +446,10 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C60](https://github.com/scudellari/golf-sim/issues/62) | Debugging guide: breakpoints in the program and in Godot | Hole, testing and CLI | codex | C59 | ~150 |
 | [C72](https://github.com/scudellari/golf-sim/issues/74) | `golf corpus` runners for the phase 2 layers | Hole, testing and CLI | codex | C71, C26, C51 | ~450 |
 | [C73](https://github.com/scudellari/golf-sim/issues/71) | Keep the release version out of determinism digests and committed records | Hole, testing and CLI | codex | C24, C27, C59 | ~120 |
+| [C76](https://github.com/scudellari/golf-sim/issues/84) | Swing styles: stamps, forgiveness, checkpoints and Rolled Chord | Swing and rules | codex | C19, reference data from the consuming game | ~500 |
+| [C77](https://github.com/scudellari/golf-sim/issues/85) | Weighted Club: the pendulum and its reference table | Swing and rules | codex | C76 | ~550 |
+| [C78](https://github.com/scudellari/golf-sim/issues/86) | Deliveries from channels, and a scheme swing's quality | World and stroke | codex | C17, C76 | ~300 |
+| [C79](https://github.com/scudellari/golf-sim/issues/87) | Records: a scheme stroke's swing entry | Variant, bundle and records | codex | C23, C76, C78 | ~250 |
 
 ### Phase 3. The person's console, headless
 
@@ -455,6 +459,7 @@ Sizes are estimates in lines of Rust, tests included. Some units also wait for r
 | [C29](https://github.com/scudellari/golf-sim/issues/31) | Console: building the address and swinging | Console | codex | C26, reference data from the consuming game | ~450 |
 | [C30](https://github.com/scudellari/golf-sim/issues/32) | Console: watching, the hole's screens and the view | Console | codex | C29 | ~450 |
 | [C31](https://github.com/scudellari/golf-sim/issues/33) | The range | Console | codex | C29 | ~450 |
+| [C80](https://github.com/scudellari/golf-sim/issues/88) | Console: swing styles | Console | codex | C29, C77, C79 | ~400 |
 
 ### Phase 4. A round on an exported day
 
